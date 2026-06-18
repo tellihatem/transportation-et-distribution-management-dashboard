@@ -1,6 +1,0 @@
-{
-  "name": "Logistics Financial Dashboard",
-  "description": "Bilingual fleet and logistics financial dashboard for monitoring revenue, operational volume, outstanding balances, and route performance.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
