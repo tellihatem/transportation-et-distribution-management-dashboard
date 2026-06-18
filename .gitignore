@@ -7,3 +7,4 @@ coverage/
 .env*
 !.env.example
 release/
+!release/Logistics Financial Dashboard Setup 1.0.0.exe
