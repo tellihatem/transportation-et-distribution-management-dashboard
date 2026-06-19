@@ -12,7 +12,19 @@ exports.seedIfEmpty = seedIfEmpty;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-const DATA_DIR = path_1.default.resolve(process.cwd(), 'data');
+/**
+ * Resolve the data directory. In a packaged Electron app process.cwd() is
+ * unreliable, so we prefer the DATABASE_PATH env var (set by electron/main.js)
+ * and fall back to a path relative to the user data folder.
+ */
+function resolveDataDir() {
+    if (process.env.DATABASE_PATH) {
+        return path_1.default.dirname(process.env.DATABASE_PATH);
+    }
+    // In development, use cwd-relative data/
+    return path_1.default.resolve(process.cwd(), 'data');
+}
+const DATA_DIR = resolveDataDir();
 const DB_PATH = process.env.DATABASE_PATH || path_1.default.join(DATA_DIR, 'logistics.db');
 // Ensure data directory exists
 if (!fs_1.default.existsSync(path_1.default.dirname(DB_PATH))) {
@@ -27,7 +39,10 @@ db.pragma('busy_timeout = 5000');
  * Run all migration files in order
  */
 function runMigrations() {
-    const migrationsDir = path_1.default.resolve(process.cwd(), 'server', 'migrations');
+    // In packaged Electron apps process.cwd() is unreliable.
+    // When built, migrations are copied into dist-server/migrations/
+    // so __dirname (dist-server) is the correct base.
+    const migrationsDir = path_1.default.resolve(__dirname, 'migrations');
     if (!fs_1.default.existsSync(migrationsDir)) {
         console.error('[DB] Migrations directory not found:', migrationsDir);
         return;

@@ -9,11 +9,62 @@ const projectRoot = path.resolve(__dirname, '..');
 const serverEntry = path.join(projectRoot, 'dist-server', 'index.js');
 const errorPage = path.join(__dirname, 'error.html');
 
-process.chdir(projectRoot);
-
 let mainWindow = null;
 let serverModule = null;
 let isQuitting = false;
+
+// --- Resolve .env for packaged vs development ---
+function loadEnvConfig() {
+  const isPackaged = app.isPackaged;
+
+  if (isPackaged) {
+    // In a packaged app, extraResources are placed next to the app.asar
+    // e.g. on Windows: resources/.env  (same level as app.asar)
+    const resourcesDir = process.resourcesPath;
+    const envPath = path.join(resourcesDir, '.env');
+
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+      console.log(`[MAIN] Loaded .env from ${envPath}`);
+    } else {
+      console.warn(`[MAIN] .env not found at ${envPath} — running with defaults`);
+    }
+
+    // Set cwd to userData so the app has a writable working directory
+    process.chdir(app.getPath('userData'));
+  } else {
+    // Development: load .env from project root via dotenv-compatible parsing
+    const envPath = path.join(projectRoot, '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+    process.chdir(projectRoot);
+  }
+}
+
+loadEnvConfig();
 
 function getServerApi(mod) {
   return mod?.startServer ? mod : mod?.default ?? {};

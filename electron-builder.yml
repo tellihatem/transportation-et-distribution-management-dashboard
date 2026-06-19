@@ -1,0 +1,58 @@
+appId: com.logistics.dashboard
+productName: Logistics Financial Dashboard
+directories:
+  output: release
+  buildResources: build
+
+# Files to include in the asar archive
+files:
+  - dist/**/*
+  - dist-server/**/*
+  - electron/**/*
+  - package.json
+
+# Include .env.example as a template (NOT .env with secrets)
+extraResources:
+  - from: .env.example
+    to: .env.example
+
+# Native modules that need to be unpacked from the asar
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+  - node_modules/@tailwindcss/**/*
+  - node_modules/lightningcss-*/**/*
+
+# Windows NSIS installer
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+# Linux AppImage
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  icon: build/icon.png
+  category: Utility
+
+# macOS
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: build/icon.icns
+
+# Node.js native module rebuild
+nodeGypRebuild: false

@@ -7,7 +7,20 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+/**
+ * Resolve the data directory. In a packaged Electron app process.cwd() is
+ * unreliable, so we prefer the DATABASE_PATH env var (set by electron/main.js)
+ * and fall back to a path relative to the user data folder.
+ */
+function resolveDataDir(): string {
+  if (process.env.DATABASE_PATH) {
+    return path.dirname(process.env.DATABASE_PATH);
+  }
+  // In development, use cwd-relative data/
+  return path.resolve(process.cwd(), 'data');
+}
+
+const DATA_DIR = resolveDataDir();
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'logistics.db');
 
 // Ensure data directory exists
@@ -26,7 +39,10 @@ db.pragma('busy_timeout = 5000');
  * Run all migration files in order
  */
 export function runMigrations(): void {
-  const migrationsDir = path.resolve(process.cwd(), 'server', 'migrations');
+  // In packaged Electron apps process.cwd() is unreliable.
+  // When built, migrations are copied into dist-server/migrations/
+  // so __dirname (dist-server) is the correct base.
+  const migrationsDir = path.resolve(__dirname, 'migrations');
 
   if (!fs.existsSync(migrationsDir)) {
     console.error('[DB] Migrations directory not found:', migrationsDir);
