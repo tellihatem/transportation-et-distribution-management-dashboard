@@ -2,18 +2,21 @@ services:
   - type: web
     name: logistics-financial-dashboard
     runtime: node
-    plan: starter # persistent disks require a paid plan, not the free tier
+    plan: free
+    # NOTE: no persistent disk on the free plan, so DATABASE_PATH below lives
+    # in the container's ephemeral filesystem. Data survives while the
+    # service is running, but resets on every redeploy and whenever the
+    # free-tier service spins down from inactivity. Fine for a one-sitting
+    # demo; if you need data to persist long-term, either upgrade to a paid
+    # plan and re-add a disk mounted at e.g. /data (update DATABASE_PATH to
+    # match), or migrate the datastore to a hosted DB like Supabase.
     buildCommand: npm install && npm run build && npm run build:server
     startCommand: node dist-server/index.js
-    disk:
-      name: logistics-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_PATH
-        value: /data/logistics.db
+        value: ./data/logistics.db
       - key: APP_PASSWORD
         sync: false # set the client's login password in the Render dashboard
       - key: SESSION_SECRET
