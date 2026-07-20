@@ -66,20 +66,30 @@ function formatAlgerianDate(d: Date): string {
   return `${d.getDate()} ${ALGERIAN_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+function getCurrentMonthRange(): { dateStart: string; dateEnd: string } {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    dateStart: `${year}-${pad(month + 1)}-01`,
+    dateEnd: `${year}-${pad(month + 1)}-${pad(lastDay)}`
+  };
+}
+
 export default function App() {
   // --- Search & Filters State ---
   const [filters, setFilters] = useState<TabFilters>({
     searchQuery: "",
-    dateStart: "2026-06-01",
-    dateEnd: "2026-06-30"
+    ...getCurrentMonthRange()
   });
 
   // Reset Filters to current month values
   const resetFilters = () => {
     setFilters({
       searchQuery: "",
-      dateStart: "2026-06-01",
-      dateEnd: "2026-06-30"
+      ...getCurrentMonthRange()
     });
   };
 
