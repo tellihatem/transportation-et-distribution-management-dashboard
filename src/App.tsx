@@ -444,13 +444,16 @@ export default function App() {
       {/* CSS stylesheet injection to handle Print receipts precisely on browser */}
       <style>{`
         @media print {
-          body {
+          body, #root, #root > div {
             background-color: white !important;
             color: black !important;
             font-size: 11px !important;
+            min-height: 0 !important;
           }
-          /* Hide absolutely everything else */
-          body > *, .no-print {
+          /* Hide everything else. (Not "body > *": the print container lives
+             nested inside the same root div as the rest of the app, so hiding
+             the root itself would hide the print container too.) */
+          .no-print {
             display: none !important;
           }
           /* Force block render of printable receipt wrapper */
@@ -1371,7 +1374,7 @@ export default function App() {
       {/* RENDER MODAL: FOR ADD/EDIT WORKFLOW */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="no-print fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -1750,7 +1753,7 @@ export default function App() {
       {/* RENDER MODAL: BILINGUAL RECEIPT VIEW & TRIGGER Browser PRINT */}
       <AnimatePresence>
         {isReceiptOpen && selectedReceipt && (
-          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="no-print fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
