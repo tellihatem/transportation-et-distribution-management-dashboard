@@ -12,3 +12,6 @@ release/*
 # Keep these files tracked
 !release/Logistics Financial Dashboard Setup 1.0.0.exe
 !release/logistics-dashboard-1.0.0-x64.nsis.7z
+.claude
+data/*.db-shm
+data/*.db-wal

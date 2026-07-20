@@ -7,6 +7,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import { config } from 'dotenv';
 import fs from 'fs';
@@ -16,9 +17,11 @@ config({ path: path.resolve(process.cwd(), '.env') });
 
 import db, { runMigrations, seedIfEmpty } from './database';
 import { errorHandler } from './middleware/error-handler';
+import { requireAuth } from './middleware/auth';
 import { processSyncQueue } from './sync/replicator';
 
 // Route imports
+import authRouter from './routes/auth';
 import tripsRouter from './routes/trips';
 import resalesRouter from './routes/resales';
 import expensesRouter from './routes/expenses';
@@ -77,11 +80,21 @@ function closeDatabase(): void {
 }
 
 // --- Middleware ---
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
+const DEV_CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:5173', 'http://0.0.0.0:3000'];
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+  : DEV_CORS_ORIGINS;
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173', 'http://0.0.0.0:3000'],
+  origin: corsOrigins,
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser(process.env.SESSION_SECRET));
 
 // Request logging
 app.use((req, _res, next) => {
@@ -98,13 +111,7 @@ console.log('[SERVER] ───────────────────�
 runMigrations();
 seedIfEmpty();
 
-// --- API Routes ---
-app.use('/api/trips', tripsRouter);
-app.use('/api/resales', resalesRouter);
-app.use('/api/expenses', expensesRouter);
-app.use('/api/sync', syncRouter);
-
-// Health check
+// Health check (public, no auth — used for uptime monitoring)
 app.get('/api/health', (_req, res) => {
   res.json({
     success: true,
@@ -113,6 +120,14 @@ app.get('/api/health', (_req, res) => {
     uptime: process.uptime(),
   });
 });
+
+// --- API Routes ---
+app.use('/api/auth', authRouter);
+app.use('/api', requireAuth);
+app.use('/api/trips', tripsRouter);
+app.use('/api/resales', resalesRouter);
+app.use('/api/expenses', expensesRouter);
+app.use('/api/sync', syncRouter);
 
 // --- Serve React Frontend (Electron/Production mode) ---
 const distPath = path.resolve(process.cwd(), 'dist');

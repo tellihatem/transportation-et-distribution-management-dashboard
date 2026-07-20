@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Truck,
   Layers,
@@ -50,48 +50,23 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 
 import { ClientTransportTrip, MaterialResaleTx, OtherExpense, TabFilters } from "./types";
-import {
-  INITIAL_CLIENT_TRIPS,
-  INITIAL_RESALE_TXS,
-  INITIAL_EXPENSES,
-  TRANSLATE_EXPENSE_CATEGORY,
-  EXPENSE_CATEGORIES
-} from "./data";
+import { TRANSLATE_EXPENSE_CATEGORY, EXPENSE_CATEGORIES } from "./data";
+import { useTrips } from "./hooks/useTrips";
+import { useResales } from "./hooks/useResales";
+import { useExpenses } from "./hooks/useExpenses";
+import logoUrl from "../assets/canvas.png";
+
+// Algerian French-loanword month names, matching the receipt's existing date convention
+const ALGERIAN_MONTHS = [
+  "جانفي", "فيفري", "مارس", "أفريل", "ماي", "جوان",
+  "جويلية", "أوت", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+];
+
+function formatAlgerianDate(d: Date): string {
+  return `${d.getDate()} ${ALGERIAN_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
 
 export default function App() {
-  // --- Persistent Local Storage Core State ---
-  const [clientTrips, setClientTrips] = useState<ClientTransportTrip[]>(() => {
-    const saved = localStorage.getItem("fl_client_trips");
-    return saved ? JSON.parse(saved) : INITIAL_CLIENT_TRIPS;
-  });
-
-  const [resaleTxs, setResaleTxs] = useState<MaterialResaleTx[]>(() => {
-    const saved = localStorage.getItem("fl_resale_txs");
-    return saved ? JSON.parse(saved) : INITIAL_RESALE_TXS;
-  });
-
-  const [expenses, setExpenses] = useState<OtherExpense[]>(() => {
-    const saved = localStorage.getItem("fl_expenses");
-    return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
-  });
-
-  // Sync to local storage
-  useEffect(() => {
-    localStorage.setItem("fl_client_trips", JSON.stringify(clientTrips));
-  }, [clientTrips]);
-
-  useEffect(() => {
-    localStorage.setItem("fl_resale_txs", JSON.stringify(resaleTxs));
-  }, [resaleTxs]);
-
-  useEffect(() => {
-    localStorage.setItem("fl_expenses", JSON.stringify(expenses));
-  }, [expenses]);
-
-  // --- Active Tab State ---
-  // "transport" = Client Transport, "resale" = Material Resale, "expenses" = Other Expenses
-  const [activeTab, setActiveTab] = useState<"transport" | "resale" | "expenses">("transport");
-
   // --- Search & Filters State ---
   const [filters, setFilters] = useState<TabFilters>({
     searchQuery: "",
@@ -107,6 +82,15 @@ export default function App() {
       dateEnd: "2026-06-30"
     });
   };
+
+  // --- Backend-backed data (Express + SQLite, via /api) ---
+  const { trips: clientTrips, error: tripsError, addTrip, editTrip, removeTrip } = useTrips(filters);
+  const { resales: resaleTxs, error: resalesError, addResale, editResale, removeResale } = useResales(filters);
+  const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
+
+  // --- Active Tab State ---
+  // "transport" = Client Transport, "resale" = Material Resale, "expenses" = Other Expenses
+  const [activeTab, setActiveTab] = useState<"transport" | "resale" | "expenses">("transport");
 
   // --- Modals State ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -325,86 +309,81 @@ export default function App() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm("هل أنت متأكد من رغبتك في حذف هذا السجل بشكل نهائي؟")) {
+  const handleDelete = async (id: string) => {
+    if (!confirm("هل أنت متأكد من رغبتك في حذف هذا السجل بشكل نهائي؟")) return;
+    try {
       if (activeTab === "transport") {
-        setClientTrips(prev => prev.filter(t => t.id !== id));
+        await removeTrip(id);
       } else if (activeTab === "resale") {
-        setResaleTxs(prev => prev.filter(tx => tx.id !== id));
+        await removeResale(id);
       } else {
-        setExpenses(prev => prev.filter(x => x.id !== id));
+        await removeExpense(id);
       }
+    } catch (err: any) {
+      alert(`تعذر حذف السجل: ${err.message}`);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (activeTab === "transport") {
-      const data: ClientTransportTrip = {
-        id: tripForm.id || `TR-${Date.now().toString().slice(-4)}`,
-        date: tripForm.date || "",
-        clientName: tripForm.clientName || "",
-        originFactory: tripForm.originFactory || "",
-        destination: tripForm.destination || "",
-        materialType: tripForm.materialType || "",
-        totalTonnage: Number(tripForm.totalTonnage) || 0,
-        truckCost: Number(tripForm.truckCost) || 0,
-        driverCut: Number(tripForm.driverCut) || 0,
-        companyProfit: Number(tripForm.companyProfit) || 0
-      };
+    try {
+      if (activeTab === "transport") {
+        const data: ClientTransportTrip = {
+          id: tripForm.id || `TR-${Date.now().toString().slice(-4)}`,
+          date: tripForm.date || "",
+          clientName: tripForm.clientName || "",
+          originFactory: tripForm.originFactory || "",
+          destination: tripForm.destination || "",
+          materialType: tripForm.materialType || "",
+          totalTonnage: Number(tripForm.totalTonnage) || 0,
+          truckCost: Number(tripForm.truckCost) || 0,
+          driverCut: Number(tripForm.driverCut) || 0,
+          companyProfit: Number(tripForm.companyProfit) || 0
+        };
 
-      if (modalType === "add") {
-        if (clientTrips.some(t => t.id === data.id)) {
-          alert("معرف الرحلة مكرر بالفعل. نوصي بتعديله لمنع التداخل!");
-          return;
+        if (modalType === "add") {
+          await addTrip(data);
+        } else {
+          await editTrip(editRecordId!, data);
         }
-        setClientTrips(prev => [data, ...prev]);
-      } else {
-        setClientTrips(prev => prev.map(t => t.id === editRecordId ? data : t));
-      }
-    } else if (activeTab === "resale") {
-      const data: MaterialResaleTx = {
-        id: resaleForm.id || `RS-${Date.now().toString().slice(-4)}`,
-        date: resaleForm.date || "",
-        endClient: resaleForm.endClient || "",
-        factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
-        totalTonnage: Number(resaleForm.totalTonnage) || 0,
-        clientSellingPrice: Number(resaleForm.clientSellingPrice) || 0,
-        truckCost: Number(resaleForm.truckCost) || 0,
-        driverCost: Number(resaleForm.driverCost) || 0,
-        explicitProfit: Number(resaleForm.explicitProfit) || 0
-      };
+      } else if (activeTab === "resale") {
+        const data: MaterialResaleTx = {
+          id: resaleForm.id || `RS-${Date.now().toString().slice(-4)}`,
+          date: resaleForm.date || "",
+          endClient: resaleForm.endClient || "",
+          factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
+          totalTonnage: Number(resaleForm.totalTonnage) || 0,
+          clientSellingPrice: Number(resaleForm.clientSellingPrice) || 0,
+          truckCost: Number(resaleForm.truckCost) || 0,
+          driverCost: Number(resaleForm.driverCost) || 0,
+          explicitProfit: Number(resaleForm.explicitProfit) || 0
+        };
 
-      if (modalType === "add") {
-        if (resaleTxs.some(r => r.id === data.id)) {
-          alert("معرف العملية مكرر بالفعل.");
-          return;
+        if (modalType === "add") {
+          await addResale(data);
+        } else {
+          await editResale(editRecordId!, data);
         }
-        setResaleTxs(prev => [data, ...prev]);
       } else {
-        setResaleTxs(prev => prev.map(r => r.id === editRecordId ? data : r));
-      }
-    } else {
-      const data: OtherExpense = {
-        id: expenseForm.id || `EXP-${Date.now().toString().slice(-4)}`,
-        date: expenseForm.date || "",
-        category: expenseForm.category || "Fuel",
-        truckPlate: expenseForm.truckPlate || "عام مجهول",
-        amount: Number(expenseForm.amount) || 0,
-        status: expenseForm.status as 'Paid' | 'Pending' || "Paid"
-      };
+        const data: OtherExpense = {
+          id: expenseForm.id || `EXP-${Date.now().toString().slice(-4)}`,
+          date: expenseForm.date || "",
+          category: expenseForm.category || "Fuel",
+          truckPlate: expenseForm.truckPlate || "عام مجهول",
+          amount: Number(expenseForm.amount) || 0,
+          status: expenseForm.status as 'Paid' | 'Pending' || "Paid"
+        };
 
-      if (modalType === "add") {
-        if (expenses.some(e => e.id === data.id)) {
-          alert("معرف المصروف مكرر بالفعل.");
-          return;
+        if (modalType === "add") {
+          await addExpense(data);
+        } else {
+          await editExpense(editRecordId!, data);
         }
-        setExpenses(prev => [data, ...prev]);
-      } else {
-        setExpenses(prev => prev.map(e => e.id === editRecordId ? data : e));
       }
+      setIsModalOpen(false);
+    } catch (err: any) {
+      alert(`تعذر حفظ السجل: ${err.message}`);
     }
-    setIsModalOpen(false);
   };
 
   // --- Local printable formatted Receipt Generator ---
@@ -414,6 +393,15 @@ export default function App() {
   };
 
   const handlePrint = () => {
+    const originalTitle = document.title;
+    if (selectedReceipt) {
+      document.title = `وصل-${selectedReceipt.data.id}`;
+    }
+    const restoreTitle = () => {
+      document.title = originalTitle;
+      window.removeEventListener("afterprint", restoreTitle);
+    };
+    window.addEventListener("afterprint", restoreTitle);
     window.print();
   };
 
@@ -497,7 +485,7 @@ export default function App() {
               <div>
                 <h1 className="text-2xl font-bold font-display text-slate-950">مؤسسة النقل اللوجستي والخدمات البرية</h1>
                 <p className="text-xs text-slate-500">إدارة الأسطول وقنوات التوريد البري - وصل شحن رسمي</p>
-                <p className="text-xs text-slate-600">التاريخ الحالي للنظام: 10 جوان 2026</p>
+                <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
               </div>
               <div className="text-left">
                 <div className="bg-slate-200 text-slate-900 border border-slate-400 px-4 py-2 font-mono text-lg font-bold rounded">
@@ -646,12 +634,12 @@ export default function App() {
 
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-700 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/10">
-                  <img src="/assets/canvas.png" alt="Company Logo" width={60} height={60} className="object-contain" />
+                  <img src={logoUrl} alt="Company Logo" width={60} height={60} className="object-contain" />
                 </div>
                 <div>
                   <h1 className="text-2xl font-black tracking-tight font-display bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
                     <span>نظام نقل وتوزيع البضائع</span>
-                    <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full font-sans tracking-wide">بيئة أوفلاين آمنة</span>
+                    <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full font-sans tracking-wide">بيئة آمنة</span>
                   </h1>
                   <p className="text-xs text-slate-400 font-sans mt-0.5 flex items-center gap-1">
                     <Compass className="h-3.5 w-3.5 text-blue-500 shrink-0" />
@@ -666,9 +654,9 @@ export default function App() {
                   <span className="text-slate-400 font-sans text-right">المسؤول</span>
                   <span className="text-white font-mono font-bold">السيد لعلوي عبد المالك</span>
                 </div>
-                <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 font-mono text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
-                  <span>المستودع المحلي نشط (100% Offline)</span>
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                  <span>متصل بقاعدة البيانات المباشرة</span>
                 </div>
               </div>
 
@@ -1799,7 +1787,7 @@ export default function App() {
                   <div>
                     <h2 className="text-xl font-bold font-display text-slate-950">مؤسسة النقل اللوجستي والخدمات البرية</h2>
                     <p className="text-[10px] text-slate-500 mt-1 uppercase">Bilingual Internal Freight Receipt</p>
-                    <p className="text-xs text-slate-600">التاريخ الحالي للنظام: 10 جوان 2026</p>
+                    <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
                   </div>
                   <div className="text-left">
                     <span className="bg-slate-200 text-slate-900 text-sm font-mono font-black border border-slate-400 px-3 py-1 rounded">
