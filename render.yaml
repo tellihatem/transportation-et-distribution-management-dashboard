@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: logistics-financial-dashboard
+    runtime: node
+    plan: starter # persistent disks require a paid plan, not the free tier
+    buildCommand: npm install && npm run build && npm run build:server
+    startCommand: node dist-server/index.js
+    disk:
+      name: logistics-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /data/logistics.db
+      - key: APP_PASSWORD
+        sync: false # set the client's login password in the Render dashboard
+      - key: SESSION_SECRET
+        generateValue: true # Render generates a secure random value automatically
+      - key: CORS_ORIGIN
+        sync: false # set to your Render URL (e.g. https://logistics-financial-dashboard.onrender.com) after first deploy
+      - key: SUPABASE_URL
+        sync: false # optional — leave unset unless enabling cloud backup sync
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false # optional — leave unset unless enabling cloud backup sync
+      - key: SYNC_INTERVAL_MS
+        value: "300000"

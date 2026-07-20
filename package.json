@@ -6,6 +6,7 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev:server": "tsx watch server/index.ts",
     "build": "vite build",
     "build:server": "tsc -p server/tsconfig.server.json && node scripts/write-dist-server-package.cjs",
     "build:electron": "npm run build && npm run build:server",
@@ -22,6 +23,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^11.8.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
@@ -34,6 +36,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
