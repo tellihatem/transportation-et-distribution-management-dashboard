@@ -46,6 +46,7 @@ exports.startServer = startServer;
 exports.stopServer = stopServer;
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const path_1 = __importDefault(require("path"));
 const dotenv_1 = require("dotenv");
 const fs_1 = __importDefault(require("fs"));
@@ -53,8 +54,10 @@ const fs_1 = __importDefault(require("fs"));
 (0, dotenv_1.config)({ path: path_1.default.resolve(process.cwd(), '.env') });
 const database_1 = __importStar(require("./database"));
 const error_handler_1 = require("./middleware/error-handler");
+const auth_1 = require("./middleware/auth");
 const replicator_1 = require("./sync/replicator");
 // Route imports
+const auth_2 = __importDefault(require("./routes/auth"));
 const trips_1 = __importDefault(require("./routes/trips"));
 const resales_1 = __importDefault(require("./routes/resales"));
 const expenses_1 = __importDefault(require("./routes/expenses"));
@@ -108,11 +111,19 @@ function closeDatabase() {
     }
 }
 // --- Middleware ---
+if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+}
+const DEV_CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:5173', 'http://0.0.0.0:3000'];
+const corsOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+    : DEV_CORS_ORIGINS;
 app.use((0, cors_1.default)({
-    origin: ['http://localhost:3000', 'http://localhost:5173', 'http://0.0.0.0:3000'],
+    origin: corsOrigins,
     credentials: true,
 }));
 app.use(express_1.default.json({ limit: '10mb' }));
+app.use((0, cookie_parser_1.default)(process.env.SESSION_SECRET));
 // Request logging
 app.use((req, _res, next) => {
     if (req.path.startsWith('/api')) {
@@ -125,12 +136,7 @@ console.log('\n[SERVER] 🚛 Logistics Financial Dashboard — Backend Server');
 console.log('[SERVER] ─────────────────────────────────────────────────');
 (0, database_1.runMigrations)();
 (0, database_1.seedIfEmpty)();
-// --- API Routes ---
-app.use('/api/trips', trips_1.default);
-app.use('/api/resales', resales_1.default);
-app.use('/api/expenses', expenses_1.default);
-app.use('/api/sync', sync_1.default);
-// Health check
+// Health check (public, no auth — used for uptime monitoring)
 app.get('/api/health', (_req, res) => {
     res.json({
         success: true,
@@ -139,6 +145,13 @@ app.get('/api/health', (_req, res) => {
         uptime: process.uptime(),
     });
 });
+// --- API Routes ---
+app.use('/api/auth', auth_2.default);
+app.use('/api', auth_1.requireAuth);
+app.use('/api/trips', trips_1.default);
+app.use('/api/resales', resales_1.default);
+app.use('/api/expenses', expenses_1.default);
+app.use('/api/sync', sync_1.default);
 // --- Serve React Frontend (Electron/Production mode) ---
 const distPath = path_1.default.resolve(process.cwd(), 'dist');
 if (fs_1.default.existsSync(distPath)) {
