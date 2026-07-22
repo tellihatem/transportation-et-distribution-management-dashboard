@@ -56,7 +56,17 @@ export function runMigrations(): void {
   for (const file of migrationFiles) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
     console.log(`[DB] Running migration: ${file}`);
-    db.exec(sql);
+    try {
+      db.exec(sql);
+    } catch (err: any) {
+      // Migrations re-run on every boot; CREATE TABLE/INDEX use IF NOT EXISTS,
+      // but ALTER TABLE ADD COLUMN has no such guard, so tolerate a rerun.
+      if (typeof err?.message === 'string' && err.message.includes('duplicate column name')) {
+        console.log(`[DB] Migration ${file} already applied, skipping.`);
+      } else {
+        throw err;
+      }
+    }
   }
 
   console.log('[DB] All migrations complete.');
@@ -81,8 +91,8 @@ export function seedIfEmpty(): void {
   `);
 
   const insertResale = db.prepare(`
-    INSERT OR IGNORE INTO material_resales (id, date, end_client, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO material_resales (id, date, end_client, destination, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertExpense = db.prepare(`
@@ -99,10 +109,10 @@ export function seedIfEmpty(): void {
     insertTrip.run('TR-206', '2026-06-09', 'مؤسسة الأشغال الكبرى العيد', 'مصنع الأجر السانية', 'حي السلام بلعباس', 'أجر أحمر 8 عيون', 30.0, 14000, 4500, 5500);
 
     // Material Resale Transactions
-    insertResale.run('RS-801', '2026-06-02', 'المقاول الأخضر لتهيئة الحدائق', 1200, 45.0, 115000, 16000, 5000, 7000);
-    insertResale.run('RS-802', '2026-06-04', 'شركة جيل المستقبل العقارية', 2500, 50.0, 220000, 22000, 7000, 11000);
-    insertResale.run('RS-803', '2026-06-06', 'مؤسسة الأشغال المائية التل', 1800, 35.0, 145000, 15000, 4500, 7500);
-    insertResale.run('RS-804', '2026-06-08', 'تعاونية البناء بلعباس الأنيق', 1100, 60.0, 160000, 18000, 6000, 8000);
+    insertResale.run('RS-801', '2026-06-02', 'المقاول الأخضر لتهيئة الحدائق', 'حديقة المسيلة الحضرية', 1200, 45.0, 115000, 16000, 5000, 7000);
+    insertResale.run('RS-802', '2026-06-04', 'شركة جيل المستقبل العقارية', 'مشروع سكني حي الأمل', 2500, 50.0, 220000, 22000, 7000, 11000);
+    insertResale.run('RS-803', '2026-06-06', 'مؤسسة الأشغال المائية التل', 'سد وادي التل', 1800, 35.0, 145000, 15000, 4500, 7500);
+    insertResale.run('RS-804', '2026-06-08', 'تعاونية البناء بلعباس الأنيق', 'حي التعاونية بلعباس', 1100, 60.0, 160000, 18000, 6000, 8000);
 
     // Other Expenses
     insertExpense.run('EXP-101', '2026-06-02', 'Fuel', '01345-116-22', 18000, 'Paid');

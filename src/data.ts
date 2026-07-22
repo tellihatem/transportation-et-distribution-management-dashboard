@@ -75,6 +75,7 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     id: "RS-801",
     date: "2026-06-02",
     endClient: "المقاول الأخضر لتهيئة الحدائق",
+    destination: "حديقة المسيلة الحضرية",
     factoryPurchasePrice: 1200, // dzd per ton
     totalTonnage: 45.0,
     clientSellingPrice: 115000, // Total selling combo to client
@@ -86,6 +87,7 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     id: "RS-802",
     date: "2026-06-04",
     endClient: "شركة جيل المستقبل العقارية",
+    destination: "مشروع سكني حي الأمل",
     factoryPurchasePrice: 2500, // dzd per ton
     totalTonnage: 50.0,
     clientSellingPrice: 220000, // Total selling combo
@@ -97,6 +99,7 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     id: "RS-803",
     date: "2026-06-06",
     endClient: "مؤسسة الأشغال المائية التل",
+    destination: "سد وادي التل",
     factoryPurchasePrice: 1800,
     totalTonnage: 35.0,
     clientSellingPrice: 145000,
@@ -108,6 +111,7 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     id: "RS-804",
     date: "2026-06-08",
     endClient: "تعاونية البناء بلعباس الأنيق",
+    destination: "حي التعاونية بلعباس",
     factoryPurchasePrice: 1100,
     totalTonnage: 60.0,
     clientSellingPrice: 160000,

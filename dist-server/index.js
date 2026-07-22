@@ -62,6 +62,7 @@ const trips_1 = __importDefault(require("./routes/trips"));
 const resales_1 = __importDefault(require("./routes/resales"));
 const expenses_1 = __importDefault(require("./routes/expenses"));
 const sync_1 = __importDefault(require("./routes/sync"));
+const backup_1 = __importDefault(require("./routes/backup"));
 const app = (0, express_1.default)();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 let httpServer = null;
@@ -152,6 +153,7 @@ app.use('/api/trips', trips_1.default);
 app.use('/api/resales', resales_1.default);
 app.use('/api/expenses', expenses_1.default);
 app.use('/api/sync', sync_1.default);
+app.use('/api/backup', backup_1.default);
 // --- Serve React Frontend (Electron/Production mode) ---
 const distPath = path_1.default.resolve(process.cwd(), 'dist');
 if (fs_1.default.existsSync(distPath)) {
