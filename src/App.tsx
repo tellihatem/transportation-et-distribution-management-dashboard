@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import {
   Truck,
   Layers,
@@ -30,7 +30,9 @@ import {
   Lock,
   Compass,
   MapPin,
-  Tag
+  Tag,
+  Download,
+  Upload
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -54,6 +56,7 @@ import { TRANSLATE_EXPENSE_CATEGORY, EXPENSE_CATEGORIES } from "./data";
 import { useTrips } from "./hooks/useTrips";
 import { useResales } from "./hooks/useResales";
 import { useExpenses } from "./hooks/useExpenses";
+import { downloadBackup, importBackup } from "./api/client";
 import logoUrl from "../assets/canvas.png";
 
 // Algerian French-loanword month names, matching the receipt's existing date convention
@@ -415,6 +418,38 @@ export default function App() {
     window.print();
   };
 
+  // --- Local database backup export/import ---
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportBackup = () => {
+    downloadBackup();
+  };
+
+  const handleImportClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!window.confirm("سيؤدي الاستيراد إلى استبدال جميع البيانات الحالية في قاعدة البيانات بالكامل بمحتوى الملف المحدد. هل تريد المتابعة؟")) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const result = await importBackup(parsed);
+      const { client_trips = 0, material_resales = 0, expenses: expensesCount = 0 } = result.imported;
+      alert(`تم الاستيراد بنجاح:\n${client_trips} رحلة نقل، ${material_resales} عملية إعادة بيع، ${expensesCount} مصروف.\nسيتم إعادة تحميل الصفحة الآن.`);
+      window.location.reload();
+    } catch (err: any) {
+      alert(`فشل استيراد النسخة الاحتياطية: ${err.message}`);
+    }
+  };
+
   // Stacked chart data formatting for Tab 1 Cost breakdown
   const tab1ChartData = useMemo(() => {
     return filteredClientTrips.slice(0, 10).map(trip => ({
@@ -495,10 +530,13 @@ export default function App() {
         <div className="hidden print-receipt-container">
           <div className="max-w-2xl mx-auto border-2 border-dashed border-slate-400 p-8 rounded-lg bg-white text-black space-y-6">
             <div className="flex justify-between items-center border-b-2 border-slate-800 pb-4">
-              <div>
-                <h1 className="text-2xl font-bold font-display text-slate-950">مؤسسة النقل اللوجستي والخدمات البرية</h1>
-                <p className="text-xs text-slate-500">إدارة الأسطول وقنوات التوريد البري - وصل شحن رسمي</p>
-                <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
+              <div className="flex items-center gap-3">
+                <img src={logoUrl} alt="Company Logo" className="h-16 w-16 object-contain shrink-0" />
+                <div>
+                  <h1 className="text-2xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلوي عبد المالك</h1>
+                  <p className="text-xs text-slate-500">فاتورة رسمية</p>
+                  <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
+                </div>
               </div>
               <div className="text-left">
                 <div className="bg-slate-200 text-slate-900 border border-slate-400 px-4 py-2 font-mono text-lg font-bold rounded">
@@ -508,112 +546,27 @@ export default function App() {
               </div>
             </div>
 
-            {selectedReceipt.type === "transport" ? (
-              <div className="space-y-4">
-                <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                  <h3 className="font-bold text-lg mb-2 text-slate-900 border-b border-slate-300 pb-1">تفاصيل شحن العملاء (Client Transport)</h3>
-                  <div className="grid grid-cols-2 gap-y-2 text-xs">
-                    <div><span className="text-slate-600">اسم العميل:</span> <strong className="text-slate-900">{selectedReceipt.data.clientName}</strong></div>
-                    <div><span className="text-slate-600">المادة المشحونة:</span> <strong className="text-slate-900">{selectedReceipt.data.materialType}</strong></div>
-                    <div><span className="text-slate-600">مصنع المنشأ:</span> <strong className="text-slate-900">{selectedReceipt.data.originFactory}</strong></div>
-                    <div><span className="text-slate-600">المقصد النهائي:</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
-                    <div><span className="text-slate-600">الحمولة الكلية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong></div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                  <h3 className="font-bold text-base mb-2 text-slate-900 border-b border-slate-300 pb-1">الهيكل المالي لتعريفة شحن الأسطول</h3>
-                  <table className="w-full text-xs text-right mt-2 border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-400 text-slate-700">
-                        <th className="pb-1">البند المقابل</th>
-                        <th className="pb-1 text-left">المبلغ بالدينار (دج)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-300">
-                      <tr>
-                        <td className="py-2">تكلفة تأجير الشاحنة (Truck Cost)</td>
-                        <td className="py-2 text-left font-mono">{selectedReceipt.data.truckCost.toLocaleString()} دج</td>
-                      </tr>
-                      <tr>
-                        <td className="py-2">أجرة السائق (Driver Cut)</td>
-                        <td className="py-2 text-left font-mono">{selectedReceipt.data.driverCut.toLocaleString()} دج</td>
-                      </tr>
-                      <tr>
-                        <td className="py-2">هامش أرباح الشركة (Company Profit)</td>
-                        <td className="py-2 text-left font-mono">{selectedReceipt.data.companyProfit.toLocaleString()} دج</td>
-                      </tr>
-                      <tr className="font-bold bg-slate-200 text-slate-900">
-                        <td className="py-2 px-2">إجمالي تكلفة المبيعات والشحن المفوتر (Total Charge)</td>
-                        <td className="py-2 px-2 text-left font-mono">
-                          {((selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit)).toLocaleString()} دج
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+            <div className="bg-slate-50 p-4 rounded border border-slate-200">
+              <div className="text-sm">
+                <span className="text-slate-600">
+                  {selectedReceipt.type === "transport" ? "اسم العميل:" : "الزبون النهائي:"}
+                </span>{" "}
+                <strong className="text-slate-900">
+                  {selectedReceipt.type === "transport" ? selectedReceipt.data.clientName : selectedReceipt.data.endClient}
+                </strong>
               </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                  <h3 className="font-bold text-lg mb-2 text-slate-900 border-b border-slate-300 pb-1">تفاصيل شراء وإعادة بيع المواد (Material Resale)</h3>
-                  <div className="grid grid-cols-2 gap-y-2 text-xs">
-                    <div><span className="text-slate-600">الزبون النهائي:</span> <strong className="text-slate-900">{selectedReceipt.data.endClient}</strong></div>
-                    <div><span className="text-slate-600">الحمولة الإجمالية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong></div>
-                    <div><span className="text-slate-600">سعر شراء الطن من المصنع:</span> <strong className="text-slate-900">{selectedReceipt.data.factoryPurchasePrice.toLocaleString()} دج / طن</strong></div>
-                    <div><span className="text-slate-600">تكلفة المواد المنشأ (Sourcing Cost):</span> <strong className="text-slate-900">{(selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage).toLocaleString()} دج</strong></div>
-                  </div>
-                </div>
+            </div>
 
-                <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                  <h3 className="font-bold text-base mb-2 text-slate-900 border-b border-slate-300 pb-1 font-display">تحليل الهيكل المالي والتسعير التجاري</h3>
-                  <table className="w-full text-xs text-right mt-2 border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-400 text-slate-700">
-                        <th className="pb-1">مكونات كلفة التوريد والإشراف اللوجستي</th>
-                        <th className="pb-1 text-left">التكلفة والتعريفة المعتمدة</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-300">
-                      <tr>
-                        <td className="py-2">أجر شحن الشاحنة (Truck Cost)</td>
-                        <td className="py-2 text-left font-mono">{selectedReceipt.data.truckCost.toLocaleString()} دج</td>
-                      </tr>
-                      <tr>
-                        <td className="py-2">أجرة السائق (Driver Cost)</td>
-                        <td className="py-2 text-left font-mono">{selectedReceipt.data.driverCost.toLocaleString()} دج</td>
-                      </tr>
-                      <tr>
-                        <td className="py-2">صرف هامش النقل الصريح (Explicit Transport Profit)</td>
-                        <td className="py-2 text-left font-mono">{selectedReceipt.data.explicitProfit.toLocaleString()} دج</td>
-                      </tr>
-                      <tr className="bg-slate-100">
-                        <td className="py-2">تعريفة النقل الظاهرة الكلية (Visible Transport Fee)</td>
-                        <td className="py-2 text-left font-mono font-bold">
-                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit).toLocaleString()} دج
-                        </td>
-                      </tr>
-                      <tr className="bg-slate-100">
-                        <td className="py-2">الهامش الإضافي المستتر (Hidden Profit Margin)</td>
-                        <td className="py-2 text-left font-mono font-bold text-amber-900">
-                          {(
-                            selectedReceipt.data.clientSellingPrice -
-                            ((selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage) +
-                              (selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit))
-                          ).toLocaleString()} دج
-                        </td>
-                      </tr>
-                      <tr className="font-bold bg-slate-200 text-slate-900 text-sm">
-                        <td className="py-2 px-2">إجمالي سعر البيع للزبون (Client Combo price)</td>
-                        <td className="py-2 px-2 text-left font-mono">
-                          {selectedReceipt.data.clientSellingPrice.toLocaleString()} دج
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 flex justify-between items-center">
+              <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
+              <span className="text-2xl font-mono font-bold text-slate-950">
+                {(
+                  selectedReceipt.type === "transport"
+                    ? selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit
+                    : selectedReceipt.data.clientSellingPrice
+                ).toLocaleString()} دج
+              </span>
+            </div>
 
             <div className="border-t border-slate-800 pt-8 flex justify-between text-xs">
               <div className="text-center w-1/3">
@@ -651,7 +604,7 @@ export default function App() {
                 </div>
                 <div>
                   <h1 className="text-2xl font-black tracking-tight font-display bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
-                    <span>نظام نقل وتوزيع البضائع</span>
+                    <span>نقل وتوزيع البضائع لعلوي عبد المالك</span>
                     <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full font-sans tracking-wide">بيئة آمنة</span>
                   </h1>
                   <p className="text-xs text-slate-400 font-sans mt-0.5 flex items-center gap-1">
@@ -667,6 +620,31 @@ export default function App() {
                   <span className="text-slate-400 font-sans text-right">المسؤول</span>
                   <span className="text-white font-mono font-bold">السيد لعلوي عبد المالك</span>
                 </div>
+
+                <button
+                  onClick={handleExportBackup}
+                  title="تصدير نسخة احتياطية من قاعدة البيانات"
+                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg transition"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span className="hidden lg:inline">تصدير نسخة احتياطية</span>
+                </button>
+                <button
+                  onClick={handleImportClick}
+                  title="استيراد نسخة احتياطية إلى قاعدة البيانات"
+                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg transition"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  <span className="hidden lg:inline">استيراد نسخة احتياطية</span>
+                </button>
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+
                 <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
                   <span>متصل بقاعدة البيانات المباشرة</span>
@@ -1798,7 +1776,7 @@ export default function App() {
 
                 <div className="flex justify-between items-start border-b border-slate-300 pb-4">
                   <div>
-                    <h2 className="text-xl font-bold font-display text-slate-950">مؤسسة النقل اللوجستي والخدمات البرية</h2>
+                    <h2 className="text-xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلوي عبد المالك</h2>
                     <p className="text-[10px] text-slate-500 mt-1 uppercase">Bilingual Internal Freight Receipt</p>
                     <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
                   </div>
