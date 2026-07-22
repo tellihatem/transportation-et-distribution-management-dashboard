@@ -126,13 +126,20 @@ $sig | Format-List *
 
 ## Before handing the installer to the client
 
+The password login screen has been removed entirely — this app is deployed
+to a single trusted client machine, so there's no auth gate in front of it
+anymore (`AuthGate.tsx`, `routes/auth.ts`, and `middleware/auth.ts` are
+still in the repo, unused, in case a login gate is ever needed again).
+
 Only `.env.example` is bundled with the app (by design — real secrets never
 get committed or packaged). After installing on the client's machine, copy
-a real `.env` (with `APP_PASSWORD` and `SESSION_SECRET` set) into the
-installed `resources\` folder, next to `.env.example`
-(`%LOCALAPPDATA%\Programs\Logistics Financial Dashboard\resources\.env`)
-— otherwise the login screen will show "لم يتم إعداد كلمة المرور على
-الخادم بعد" (password not configured) and nobody can log in.
+`certs/client.env` (gitignored, not committed) to the installed `resources\`
+folder as `.env`, next to `.env.example`
+(`%LOCALAPPDATA%\Programs\Logistics Financial Dashboard\resources\.env`).
+This isn't strictly required for the app to run (it works with defaults
+even without it), but it silences the "`.env` not found" startup warning
+and gives you a place to drop in Supabase credentials later if you want
+cloud backup for this client.
 
 ## The SmartScreen caveat — read this before promising anything to the client
 

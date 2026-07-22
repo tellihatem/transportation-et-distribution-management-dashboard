@@ -54,10 +54,9 @@ const fs_1 = __importDefault(require("fs"));
 (0, dotenv_1.config)({ path: path_1.default.resolve(process.cwd(), '.env') });
 const database_1 = __importStar(require("./database"));
 const error_handler_1 = require("./middleware/error-handler");
-const auth_1 = require("./middleware/auth");
 const replicator_1 = require("./sync/replicator");
 // Route imports
-const auth_2 = __importDefault(require("./routes/auth"));
+const auth_1 = __importDefault(require("./routes/auth"));
 const trips_1 = __importDefault(require("./routes/trips"));
 const resales_1 = __importDefault(require("./routes/resales"));
 const expenses_1 = __importDefault(require("./routes/expenses"));
@@ -147,8 +146,10 @@ app.get('/api/health', (_req, res) => {
     });
 });
 // --- API Routes ---
-app.use('/api/auth', auth_2.default);
-app.use('/api', auth_1.requireAuth);
+// Auth is disabled: this app is deployed to a single trusted client machine,
+// so there's no login gate in front of /api/* (routes/auth.ts and AuthGate.tsx
+// are still here, unused, if a login gate is ever needed again).
+app.use('/api/auth', auth_1.default);
 app.use('/api/trips', trips_1.default);
 app.use('/api/resales', resales_1.default);
 app.use('/api/expenses', expenses_1.default);
