@@ -547,13 +547,35 @@ export default function App() {
             </div>
 
             <div className="bg-slate-50 p-4 rounded border border-slate-200">
-              <div className="text-sm">
-                <span className="text-slate-600">
-                  {selectedReceipt.type === "transport" ? "اسم العميل:" : "الزبون النهائي:"}
-                </span>{" "}
-                <strong className="text-slate-900">
-                  {selectedReceipt.type === "transport" ? selectedReceipt.data.clientName : selectedReceipt.data.endClient}
-                </strong>
+              <div className="grid grid-cols-2 gap-y-2 text-xs">
+                <div>
+                  <span className="text-slate-600">
+                    {selectedReceipt.type === "transport" ? "اسم العميل:" : "الزبون النهائي:"}
+                  </span>{" "}
+                  <strong className="text-slate-900">
+                    {selectedReceipt.type === "transport" ? selectedReceipt.data.clientName : selectedReceipt.data.endClient}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-600">الإجمالي بالوزن:</span>{" "}
+                  <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong>
+                </div>
+                {selectedReceipt.type === "transport" && (
+                  <>
+                    <div>
+                      <span className="text-slate-600">المادة المشحونة:</span>{" "}
+                      <strong className="text-slate-900">{selectedReceipt.data.materialType}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-600">منشأ الشحنة:</span>{" "}
+                      <strong className="text-slate-900">{selectedReceipt.data.originFactory}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-600">الوجهة المستهدفة:</span>{" "}
+                      <strong className="text-slate-900">{selectedReceipt.data.destination}</strong>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
