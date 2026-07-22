@@ -23,6 +23,7 @@ export interface MaterialResaleTx {
   id: string; // Transaction ID
   date: string; // YYYY-MM-DD
   endClient: string;
+  destination: string; // Delivery location for the resold materials
   factoryPurchasePrice: number; // Purchase price per ton
   totalTonnage: number;
   clientSellingPrice: number; // Total combo price sold to customer (Material + Delivery)

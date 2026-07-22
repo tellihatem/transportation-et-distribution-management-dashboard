@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS material_resales (
     id TEXT PRIMARY KEY,
     date TEXT NOT NULL,
     end_client TEXT NOT NULL,
+    destination TEXT NOT NULL DEFAULT '',
     factory_purchase_price INTEGER NOT NULL,
     total_tonnage NUMERIC NOT NULL,
     client_selling_price INTEGER NOT NULL,
@@ -60,3 +61,7 @@ CREATE POLICY "service_full_access" ON expenses FOR ALL USING (true) WITH CHECK 
 CREATE INDEX IF NOT EXISTS idx_trips_date ON client_trips(date);
 CREATE INDEX IF NOT EXISTS idx_resales_date ON material_resales(date);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+
+-- If this schema was already applied before the "destination" column existed,
+-- run this once against an existing instance:
+-- ALTER TABLE material_resales ADD COLUMN destination TEXT NOT NULL DEFAULT '';

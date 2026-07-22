@@ -137,6 +137,7 @@ export default function App() {
     id: "",
     date: new Date().toISOString().split("T")[0],
     endClient: "",
+    destination: "",
     factoryPurchasePrice: 1500,
     totalTonnage: 40,
     clientSellingPrice: 150000,
@@ -186,6 +187,7 @@ export default function App() {
     return resaleTxs.filter(tx => {
       const matchSearch = !filters.searchQuery ||
         tx.endClient.toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
+        (tx.destination || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         tx.id.toLowerCase().includes(filters.searchQuery.toLowerCase());
 
       const matchDate = (!filters.dateStart || tx.date >= filters.dateStart) &&
@@ -289,6 +291,7 @@ export default function App() {
         id: `RS-${Math.floor(800 + Math.random() * 200)}`,
         date: new Date().toISOString().split("T")[0],
         endClient: "",
+        destination: "",
         factoryPurchasePrice: 1500,
         totalTonnage: 40,
         clientSellingPrice: 180000,
@@ -364,6 +367,7 @@ export default function App() {
           id: resaleForm.id || `RS-${Date.now().toString().slice(-4)}`,
           date: resaleForm.date || "",
           endClient: resaleForm.endClient || "",
+          destination: resaleForm.destination || "",
           factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
           totalTonnage: Number(resaleForm.totalTonnage) || 0,
           clientSellingPrice: Number(resaleForm.clientSellingPrice) || 0,
@@ -560,7 +564,7 @@ export default function App() {
                   <span className="text-slate-600">الإجمالي بالوزن:</span>{" "}
                   <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong>
                 </div>
-                {selectedReceipt.type === "transport" && (
+                {selectedReceipt.type === "transport" ? (
                   <>
                     <div>
                       <span className="text-slate-600">المادة المشحونة:</span>{" "}
@@ -575,6 +579,11 @@ export default function App() {
                       <strong className="text-slate-900">{selectedReceipt.data.destination}</strong>
                     </div>
                   </>
+                ) : (
+                  <div>
+                    <span className="text-slate-600">الوجهة المستهدفة:</span>{" "}
+                    <strong className="text-slate-900">{selectedReceipt.data.destination}</strong>
+                  </div>
                 )}
               </div>
             </div>
@@ -1163,6 +1172,9 @@ export default function App() {
                                     <td className="p-3">
                                       <div className="font-bold text-slate-100">{tx.endClient}</div>
                                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">{tx.totalTonnage} طن × {tx.factoryPurchasePrice} دج</div>
+                                      {tx.destination && (
+                                        <div className="text-[10px] text-slate-500 mt-0.5">إلى: {tx.destination}</div>
+                                      )}
                                     </td>
                                     <td className="p-3 text-slate-300 font-mono">
                                       <div>البيع: {tx.clientSellingPrice.toLocaleString()}</div>
@@ -1583,6 +1595,18 @@ export default function App() {
                       />
                     </div>
 
+                    <div>
+                      <label className="block text-slate-400 mb-1">الوجهة (المكان الذي ستُنقل إليه السلعة)</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="موقع التسليم النهائي"
+                        value={resaleForm.destination}
+                        onChange={e => setResaleForm(p => ({ ...p, destination: e.target.value }))}
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                      />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-slate-400 mb-1">سعر الشراء الكلي من الشركة الأصلية (للطن دج)</label>
@@ -1849,6 +1873,7 @@ export default function App() {
                   <div className="space-y-4 text-xs">
                     <div className="grid grid-cols-2 gap-y-2">
                       <div><span className="text-slate-500">الزبون النهائي:</span> <strong className="text-slate-900">{selectedReceipt.data.endClient}</strong></div>
+                      <div><span className="text-slate-500">الوجهة المستهدفة:</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
                       <div><span className="text-slate-500">الحمولة الكلية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong></div>
                       <div><span className="text-slate-500">سعر شراء المصنع (للطن):</span> <strong className="text-slate-900">{selectedReceipt.data.factoryPurchasePrice.toLocaleString()} دج / طن</strong></div>
                       <div><span className="text-slate-500">كلفة السلع الكلية (Sourcing Cost):</span> <strong className="text-slate-900">{(selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage).toLocaleString()} دج</strong></div>

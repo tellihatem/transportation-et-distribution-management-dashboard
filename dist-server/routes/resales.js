@@ -22,10 +22,11 @@ router.get('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     if (search && typeof search === 'string' && search.trim()) {
         sql += ` AND (
       id LIKE ? OR
-      end_client LIKE ?
+      end_client LIKE ? OR
+      destination LIKE ?
     )`;
         const term = `%${search.trim()}%`;
-        params.push(term, term);
+        params.push(term, term, term);
     }
     if (dateStart && typeof dateStart === 'string') {
         sql += ' AND date >= ?';
@@ -48,9 +49,9 @@ router.get('/stats', (0, error_handler_1.asyncHandler)(async (req, res) => {
     let sql = 'SELECT * FROM material_resales WHERE 1=1';
     const params = [];
     if (search && typeof search === 'string' && search.trim()) {
-        sql += ` AND (id LIKE ? OR end_client LIKE ?)`;
+        sql += ` AND (id LIKE ? OR end_client LIKE ? OR destination LIKE ?)`;
         const term = `%${search.trim()}%`;
-        params.push(term, term);
+        params.push(term, term, term);
     }
     if (dateStart) {
         sql += ' AND date >= ?';
@@ -90,7 +91,7 @@ router.get('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * POST /api/resales — Create new resale
  */
 router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const { id, date, endClient, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
+    const { id, date, endClient, destination, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
     if (!id || !date || !endClient) {
         throw (0, error_handler_1.createApiError)('Missing required fields: id, date, endClient', 400, 'VALIDATION_ERROR');
     }
@@ -99,9 +100,9 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
         throw (0, error_handler_1.createApiError)('Resale ID already exists', 409, 'DUPLICATE_ID');
     }
     database_1.default.prepare(`
-    INSERT INTO material_resales (id, date, end_client, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, date, endClient, factoryPurchasePrice || 0, totalTonnage || 0, clientSellingPrice || 0, truckCost || 0, driverCost || 0, explicitProfit || 0);
+    INSERT INTO material_resales (id, date, end_client, destination, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, date, endClient, destination || '', factoryPurchasePrice || 0, totalTonnage || 0, clientSellingPrice || 0, truckCost || 0, driverCost || 0, explicitProfit || 0);
     const created = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(id);
     (0, replicator_1.queueSync)('material_resales', id, 'upsert', created);
     res.status(201).json({ success: true, data: mapRowToResale(created) });
@@ -113,14 +114,14 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Resale not found', 404, 'NOT_FOUND');
-    const { date, endClient, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
+    const { date, endClient, destination, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
     database_1.default.prepare(`
     UPDATE material_resales SET
-      date = ?, end_client = ?, factory_purchase_price = ?, total_tonnage = ?,
+      date = ?, end_client = ?, destination = ?, factory_purchase_price = ?, total_tonnage = ?,
       client_selling_price = ?, truck_cost = ?, driver_cost = ?,
       explicit_profit = ?, updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, endClient, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit, req.params.id);
+  `).run(date, endClient, destination || '', factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit, req.params.id);
     const updated = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
     (0, replicator_1.queueSync)('material_resales', req.params.id, 'upsert', updated);
     res.json({ success: true, data: mapRowToResale(updated) });
@@ -144,6 +145,7 @@ function mapRowToResale(row) {
         id: row.id,
         date: row.date,
         endClient: row.end_client,
+        destination: row.destination,
         factoryPurchasePrice: row.factory_purchase_price,
         totalTonnage: row.total_tonnage,
         clientSellingPrice: row.client_selling_price,

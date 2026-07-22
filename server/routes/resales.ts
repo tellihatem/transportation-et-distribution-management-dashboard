@@ -22,10 +22,11 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
   if (search && typeof search === 'string' && search.trim()) {
     sql += ` AND (
       id LIKE ? OR
-      end_client LIKE ?
+      end_client LIKE ? OR
+      destination LIKE ?
     )`;
     const term = `%${search.trim()}%`;
-    params.push(term, term);
+    params.push(term, term, term);
   }
 
   if (dateStart && typeof dateStart === 'string') {
@@ -56,9 +57,9 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
   const params: any[] = [];
 
   if (search && typeof search === 'string' && search.trim()) {
-    sql += ` AND (id LIKE ? OR end_client LIKE ?)`;
+    sql += ` AND (id LIKE ? OR end_client LIKE ? OR destination LIKE ?)`;
     const term = `%${search.trim()}%`;
-    params.push(term, term);
+    params.push(term, term, term);
   }
   if (dateStart) { sql += ' AND date >= ?'; params.push(dateStart); }
   if (dateEnd) { sql += ' AND date <= ?'; params.push(dateEnd); }
@@ -98,7 +99,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
  * POST /api/resales — Create new resale
  */
 router.post('/', asyncHandler(async (req: Request, res: Response) => {
-  const { id, date, endClient, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
+  const { id, date, endClient, destination, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
 
   if (!id || !date || !endClient) {
     throw createApiError('Missing required fields: id, date, endClient', 400, 'VALIDATION_ERROR');
@@ -110,9 +111,9 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   }
 
   db.prepare(`
-    INSERT INTO material_resales (id, date, end_client, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, date, endClient, factoryPurchasePrice || 0, totalTonnage || 0, clientSellingPrice || 0, truckCost || 0, driverCost || 0, explicitProfit || 0);
+    INSERT INTO material_resales (id, date, end_client, destination, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, date, endClient, destination || '', factoryPurchasePrice || 0, totalTonnage || 0, clientSellingPrice || 0, truckCost || 0, driverCost || 0, explicitProfit || 0);
 
   const created = db.prepare('SELECT * FROM material_resales WHERE id = ?').get(id);
   queueSync('material_resales', id, 'upsert', created);
@@ -127,15 +128,15 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
   if (!existing) throw createApiError('Resale not found', 404, 'NOT_FOUND');
 
-  const { date, endClient, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
+  const { date, endClient, destination, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit } = req.body;
 
   db.prepare(`
     UPDATE material_resales SET
-      date = ?, end_client = ?, factory_purchase_price = ?, total_tonnage = ?,
+      date = ?, end_client = ?, destination = ?, factory_purchase_price = ?, total_tonnage = ?,
       client_selling_price = ?, truck_cost = ?, driver_cost = ?,
       explicit_profit = ?, updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, endClient, factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit, req.params.id);
+  `).run(date, endClient, destination || '', factoryPurchasePrice, totalTonnage, clientSellingPrice, truckCost, driverCost, explicitProfit, req.params.id);
 
   const updated = db.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
   queueSync('material_resales', req.params.id, 'upsert', updated);
@@ -164,6 +165,7 @@ function mapRowToResale(row: any) {
     id: row.id,
     date: row.date,
     endClient: row.end_client,
+    destination: row.destination,
     factoryPurchasePrice: row.factory_purchase_price,
     totalTonnage: row.total_tonnage,
     clientSellingPrice: row.client_selling_price,
