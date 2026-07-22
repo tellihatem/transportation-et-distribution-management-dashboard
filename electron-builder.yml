@@ -15,6 +15,8 @@ files:
 extraResources:
   - from: .env.example
     to: .env.example
+  - from: certs/logistics-dashboard.cer
+    to: logistics-dashboard.cer
 
 # Native modules that need to be unpacked from the asar
 asarUnpack:
@@ -29,6 +31,8 @@ win:
       arch:
         - x64
   icon: build/icon.ico
+  signtoolOptions:
+    rfc3161TimeStampServer: http://timestamp.digicert.com
 
 nsis:
   oneClick: false
