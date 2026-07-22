@@ -192,6 +192,30 @@ export async function restoreFromCloud(): Promise<{
 }
 
 // ──────────────────────────────────────────
+// Backup / Restore (local file-based)
+// ──────────────────────────────────────────
+
+/**
+ * Triggers a browser download of a full JSON backup of the local database.
+ */
+export function downloadBackup(): void {
+  const a = document.createElement('a');
+  a.href = `${BASE_URL}/backup/export`;
+  a.click();
+}
+
+/**
+ * Restores the local database from a previously exported backup file.
+ * REPLACES all existing records — the caller should confirm with the user first.
+ */
+export async function importBackup(backup: any): Promise<{ imported: Record<string, number> }> {
+  return request('/backup/import', {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true, tables: backup?.tables }),
+  });
+}
+
+// ──────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────
 
