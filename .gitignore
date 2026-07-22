@@ -1,17 +1,21 @@
 node_modules/
-build/
+build/*
 dist/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+certs/
+.electron-dist-cache/
 
 release/*
 
 # Keep these files tracked
 !release/Logistics Financial Dashboard Setup 1.0.0.exe
 !release/logistics-dashboard-1.0.0-x64.nsis.7z
+!build/icon.ico
+!build/installer.nsh
 .claude
 data/*.db-shm
 data/*.db-wal

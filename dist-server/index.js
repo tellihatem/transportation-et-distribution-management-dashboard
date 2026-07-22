@@ -155,7 +155,12 @@ app.use('/api/expenses', expenses_1.default);
 app.use('/api/sync', sync_1.default);
 app.use('/api/backup', backup_1.default);
 // --- Serve React Frontend (Electron/Production mode) ---
-const distPath = path_1.default.resolve(process.cwd(), 'dist');
+// Resolved relative to this compiled module (dist-server/index.js), not
+// process.cwd() — in the packaged Electron app, main.js chdir()s to the
+// userData directory before loading this module, so cwd cannot be used to
+// locate the sibling dist/ folder (same reasoning as runMigrations() in
+// database.ts).
+const distPath = path_1.default.resolve(__dirname, '..', 'dist');
 if (fs_1.default.existsSync(distPath)) {
     app.use(express_1.default.static(distPath));
     app.get('*', (req, res, next) => {
