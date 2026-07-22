@@ -600,7 +600,7 @@ export default function App() {
                 <div className="h-0.5 bg-slate-300 w-32 mx-auto"></div>
               </div>
               <div className="text-center w-1/3">
-                <p className="font-bold mb-8">صادق عليها من المحلل المالي</p>
+                <p className="font-bold mb-8">صادق عليها المسؤول</p>
                 <div className="h-0.5 bg-slate-300 w-32 mx-auto"></div>
                 <p className="font-mono text-[10px] text-slate-500 mt-1">Lalaoui A. / Bilal R.</p>
               </div>
@@ -1897,7 +1897,7 @@ export default function App() {
                     <div className="h-0.5 bg-slate-300 w-24 mx-auto"></div>
                   </div>
                   <div className="text-center w-1/3">
-                    <p className="font-bold mb-6 text-slate-700">اعتماد المحلل المالي</p>
+                    <p className="font-bold mb-6 text-slate-700">اعتماد المسؤول</p>
                     <div className="h-0.5 bg-slate-300 w-24 mx-auto"></div>
                   </div>
                 </div>
