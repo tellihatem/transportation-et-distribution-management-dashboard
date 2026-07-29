@@ -16,9 +16,17 @@ const TABLES = ['client_trips', 'material_resales', 'expenses'] as const;
 type TableName = typeof TABLES[number];
 
 const COLUMNS_BY_TABLE: Record<TableName, string[]> = {
-  client_trips: ['id', 'date', 'client_name', 'origin_factory', 'destination', 'material_type', 'total_tonnage', 'truck_cost', 'driver_cut', 'company_profit', 'created_at', 'updated_at'],
-  material_resales: ['id', 'date', 'end_client', 'factory_purchase_price', 'total_tonnage', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'created_at', 'updated_at'],
+  client_trips: ['id', 'date', 'client_name', 'origin_factory', 'destination', 'material_type', 'total_tonnage', 'truck_cost', 'driver_cut', 'company_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
+  material_resales: ['id', 'date', 'end_client', 'destination', 'factory_purchase_price', 'total_tonnage', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
   expenses: ['id', 'date', 'category', 'truck_plate', 'amount', 'status', 'created_at', 'updated_at'],
+};
+
+// Defaults for columns that may be absent in backups from older app versions
+const COLUMN_FALLBACKS: Record<string, string | number> = {
+  destination: '',
+  driver_name: '',
+  client_paid: 0,
+  driver_paid: 0,
 };
 
 /**
@@ -78,7 +86,11 @@ router.post('/import', asyncHandler(async (req: Request, res: Response) => {
 
       db.prepare(`DELETE FROM ${table}`).run();
       for (const row of rows) {
-        insert.run(...cols.map(c => row[c] ?? null));
+        // Backups from older app versions may lack columns added later
+        // (destination, driver_name, client_paid, driver_paid). Inserting an
+        // explicit NULL bypasses SQLite column defaults and can violate
+        // NOT NULL, so coalesce missing values to safe defaults instead.
+        insert.run(...cols.map(c => row[c] ?? COLUMN_FALLBACKS[c] ?? null));
       }
       counts[table] = rows.length;
     }

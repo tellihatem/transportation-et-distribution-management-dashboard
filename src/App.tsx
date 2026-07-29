@@ -56,7 +56,7 @@ import { TRANSLATE_EXPENSE_CATEGORY, EXPENSE_CATEGORIES } from "./data";
 import { useTrips } from "./hooks/useTrips";
 import { useResales } from "./hooks/useResales";
 import { useExpenses } from "./hooks/useExpenses";
-import { downloadBackup, importBackup } from "./api/client";
+import { downloadBackup, importBackup, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
 import logoUrl from "../assets/canvas.png";
 
 // Algerian French-loanword month names, matching the receipt's existing date convention
@@ -67,6 +67,20 @@ const ALGERIAN_MONTHS = [
 
 function formatAlgerianDate(d: Date): string {
   return `${d.getDate()} ${ALGERIAN_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Colored paid/remaining badge used in the trips and resales tables
+function PaymentBadge({ paid, total }: { paid: number; total: number }) {
+  const remaining = total - paid;
+  return remaining <= 0 ? (
+    <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900/30 text-emerald-400 border border-emerald-800/65">
+      مدفوع بالكامل
+    </span>
+  ) : (
+    <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/40 text-amber-300 border border-amber-800">
+      متبقي: {remaining.toLocaleString()} دج
+    </span>
+  );
 }
 
 function getCurrentMonthRange(): { dateStart: string; dateEnd: string } {
@@ -129,7 +143,10 @@ export default function App() {
     totalTonnage: 30,
     truckCost: 15000,
     driverCut: 5000,
-    companyProfit: 5000
+    companyProfit: 5000,
+    driverName: "",
+    clientPaid: 0,
+    driverPaid: 0
   });
 
   // State for Resale (Tab 2 Form)
@@ -143,7 +160,10 @@ export default function App() {
     clientSellingPrice: 150000,
     truckCost: 18000,
     driverCost: 5000,
-    explicitProfit: 8000
+    explicitProfit: 8000,
+    driverName: "",
+    clientPaid: 0,
+    driverPaid: 0
   });
 
   // State for Expense (Tab 3 Form)
@@ -174,6 +194,7 @@ export default function App() {
         t.destination.toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         t.originFactory.toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         t.id.toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
+        (t.driverName || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         t.materialType.toLowerCase().includes(filters.searchQuery.toLowerCase());
 
       const matchDate = (!filters.dateStart || t.date >= filters.dateStart) &&
@@ -188,6 +209,7 @@ export default function App() {
       const matchSearch = !filters.searchQuery ||
         tx.endClient.toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         (tx.destination || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
+        (tx.driverName || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         tx.id.toLowerCase().includes(filters.searchQuery.toLowerCase());
 
       const matchDate = (!filters.dateStart || tx.date >= filters.dateStart) &&
@@ -219,6 +241,8 @@ export default function App() {
     let driverPayout = 0;
     let netMargin = 0; // Company Profit
     let totalTons = 0;
+    let clientOutstanding = 0; // Still owed by clients
+    let driverOutstanding = 0; // Still owed to drivers
 
     filteredClientTrips.forEach(trip => {
       const tripFee = trip.truckCost + trip.driverCut + trip.companyProfit;
@@ -226,9 +250,11 @@ export default function App() {
       driverPayout += trip.driverCut;
       netMargin += trip.companyProfit;
       totalTons += trip.totalTonnage;
+      clientOutstanding += Math.max(0, tripFee - (trip.clientPaid || 0));
+      driverOutstanding += Math.max(0, trip.driverCut - (trip.driverPaid || 0));
     });
 
-    return { grossRevenue, driverPayout, netMargin, totalTons };
+    return { grossRevenue, driverPayout, netMargin, totalTons, clientOutstanding, driverOutstanding };
   }, [filteredClientTrips]);
 
   // Tab 2 Profits
@@ -237,6 +263,8 @@ export default function App() {
     let capitalOutlay = 0;    // purchase price * tonnage
     let totalTrueProfit = 0;
     let totalTons = 0;
+    let clientOutstanding = 0; // Still owed by clients
+    let driverOutstanding = 0; // Still owed to drivers
 
     filteredResaleTxs.forEach(tx => {
       const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
@@ -248,9 +276,11 @@ export default function App() {
       capitalOutlay += sourcingCost;
       totalTrueProfit += trueProfit;
       totalTons += tx.totalTonnage;
+      clientOutstanding += Math.max(0, tx.clientSellingPrice - (tx.clientPaid || 0));
+      driverOutstanding += Math.max(0, tx.driverCost - (tx.driverPaid || 0));
     });
 
-    return { tradingTurnover, capitalOutlay, totalTrueProfit, totalTons };
+    return { tradingTurnover, capitalOutlay, totalTrueProfit, totalTons, clientOutstanding, driverOutstanding };
   }, [filteredResaleTxs]);
 
   // Tab 3 Expenses
@@ -270,12 +300,23 @@ export default function App() {
   const masterNetCashflow = (tab1Stats.netMargin + tab2Stats.totalTrueProfit) - tab3Stats.totalOverhead;
 
   // --- Add / Edit Records Logic ---
-  const handleOpenAdd = () => {
+  // IDs are sequential (TR-1, TR-2, ...), computed server-side from the full
+  // table so month/search filters on the loaded list can't cause collisions.
+  const localNextId = (prefix: string, ids: string[]) => {
+    const max = ids.reduce((m, id) => {
+      const match = id.match(/(\d+)\s*$/);
+      return match ? Math.max(m, parseInt(match[1], 10)) : m;
+    }, 0);
+    return `${prefix}${max + 1}`;
+  };
+
+  const handleOpenAdd = async () => {
     setModalType("add");
     setEditRecordId(null);
     if (activeTab === "transport") {
+      const id = await fetchNextTripId().catch(() => localNextId("TR-", clientTrips.map(t => t.id)));
       setTripForm({
-        id: `TR-${Math.floor(100 + Math.random() * 900)}`,
+        id,
         date: new Date().toISOString().split("T")[0],
         clientName: "",
         originFactory: "",
@@ -284,11 +325,15 @@ export default function App() {
         totalTonnage: 32,
         truckCost: 15000,
         driverCut: 5000,
-        companyProfit: 6000
+        companyProfit: 6000,
+        driverName: "",
+        clientPaid: 0,
+        driverPaid: 0
       });
     } else if (activeTab === "resale") {
+      const id = await fetchNextResaleId().catch(() => localNextId("RS-", resaleTxs.map(t => t.id)));
       setResaleForm({
-        id: `RS-${Math.floor(800 + Math.random() * 200)}`,
+        id,
         date: new Date().toISOString().split("T")[0],
         endClient: "",
         destination: "",
@@ -297,11 +342,15 @@ export default function App() {
         clientSellingPrice: 180000,
         truckCost: 18000,
         driverCost: 5000,
-        explicitProfit: 8000
+        explicitProfit: 8000,
+        driverName: "",
+        clientPaid: 0,
+        driverPaid: 0
       });
     } else {
+      const id = await fetchNextExpenseId().catch(() => localNextId("EXP-", expenses.map(e => e.id)));
       setExpenseForm({
-        id: `EXP-${Math.floor(100 + Math.random() * 900)}`,
+        id,
         date: new Date().toISOString().split("T")[0],
         category: "Fuel",
         truckPlate: "",
@@ -345,7 +394,7 @@ export default function App() {
     try {
       if (activeTab === "transport") {
         const data: ClientTransportTrip = {
-          id: tripForm.id || `TR-${Date.now().toString().slice(-4)}`,
+          id: tripForm.id || localNextId("TR-", clientTrips.map(t => t.id)),
           date: tripForm.date || "",
           clientName: tripForm.clientName || "",
           originFactory: tripForm.originFactory || "",
@@ -354,7 +403,10 @@ export default function App() {
           totalTonnage: Number(tripForm.totalTonnage) || 0,
           truckCost: Number(tripForm.truckCost) || 0,
           driverCut: Number(tripForm.driverCut) || 0,
-          companyProfit: Number(tripForm.companyProfit) || 0
+          companyProfit: Number(tripForm.companyProfit) || 0,
+          driverName: tripForm.driverName || "",
+          clientPaid: Number(tripForm.clientPaid) || 0,
+          driverPaid: Number(tripForm.driverPaid) || 0
         };
 
         if (modalType === "add") {
@@ -364,7 +416,7 @@ export default function App() {
         }
       } else if (activeTab === "resale") {
         const data: MaterialResaleTx = {
-          id: resaleForm.id || `RS-${Date.now().toString().slice(-4)}`,
+          id: resaleForm.id || localNextId("RS-", resaleTxs.map(t => t.id)),
           date: resaleForm.date || "",
           endClient: resaleForm.endClient || "",
           destination: resaleForm.destination || "",
@@ -373,7 +425,10 @@ export default function App() {
           clientSellingPrice: Number(resaleForm.clientSellingPrice) || 0,
           truckCost: Number(resaleForm.truckCost) || 0,
           driverCost: Number(resaleForm.driverCost) || 0,
-          explicitProfit: Number(resaleForm.explicitProfit) || 0
+          explicitProfit: Number(resaleForm.explicitProfit) || 0,
+          driverName: resaleForm.driverName || "",
+          clientPaid: Number(resaleForm.clientPaid) || 0,
+          driverPaid: Number(resaleForm.driverPaid) || 0
         };
 
         if (modalType === "add") {
@@ -383,7 +438,7 @@ export default function App() {
         }
       } else {
         const data: OtherExpense = {
-          id: expenseForm.id || `EXP-${Date.now().toString().slice(-4)}`,
+          id: expenseForm.id || localNextId("EXP-", expenses.map(e => e.id)),
           date: expenseForm.date || "",
           category: expenseForm.category || "Fuel",
           truckPlate: expenseForm.truckPlate || "عام مجهول",
@@ -458,9 +513,9 @@ export default function App() {
   const tab1ChartData = useMemo(() => {
     return filteredClientTrips.slice(0, 10).map(trip => ({
       name: trip.id,
-      "تكلفة الشاحنة (Truck Cost)": trip.truckCost,
-      "مستحقات السائق (Driver Cut)": trip.driverCut,
-      "هامش الشركة (Company Profit)": trip.companyProfit,
+      "تكلفة الشاحنة": trip.truckCost,
+      "مستحقات السائق": trip.driverCut,
+      "هامش الشركة": trip.companyProfit,
     })).reverse();
   }, [filteredClientTrips]);
 
@@ -470,9 +525,9 @@ export default function App() {
       const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
       return {
         name: tx.id,
-        "تكلفة شراء المادة (Sourcing Cost)": sourcingCost,
-        "سعر البيع النهائي (Selling Combo)": tx.clientSellingPrice,
-        "إجمالي الربح الفعلي (True Profit)": tx.explicitProfit + (tx.clientSellingPrice - (sourcingCost + tx.truckCost + tx.driverCost + tx.explicitProfit))
+        "تكلفة شراء المادة": sourcingCost,
+        "سعر البيع النهائي": tx.clientSellingPrice,
+        "إجمالي الربح الفعلي": tx.explicitProfit + (tx.clientSellingPrice - (sourcingCost + tx.truckCost + tx.driverCost + tx.explicitProfit))
       };
     }).reverse();
   }, [filteredResaleTxs]);
@@ -535,9 +590,9 @@ export default function App() {
           <div className="max-w-2xl mx-auto border-2 border-dashed border-slate-400 p-8 rounded-lg bg-white text-black space-y-6">
             <div className="flex justify-between items-center border-b-2 border-slate-800 pb-4">
               <div className="flex items-center gap-3">
-                <img src={logoUrl} alt="Company Logo" className="h-16 w-16 object-contain shrink-0" />
+                <img src={logoUrl} alt="شعار الشركة" className="h-16 w-16 object-contain shrink-0" />
                 <div>
-                  <h1 className="text-2xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلوي عبد المالك</h1>
+                  <h1 className="text-2xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلاوي عبد المالك</h1>
                   <p className="text-xs text-slate-500">فاتورة رسمية</p>
                   <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
                 </div>
@@ -585,19 +640,40 @@ export default function App() {
                     <strong className="text-slate-900">{selectedReceipt.data.destination}</strong>
                   </div>
                 )}
+                {selectedReceipt.data.driverName && (
+                  <div>
+                    <span className="text-slate-600">السائق:</span>{" "}
+                    <strong className="text-slate-900">{selectedReceipt.data.driverName}</strong>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 flex justify-between items-center">
-              <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
-              <span className="text-2xl font-mono font-bold text-slate-950">
-                {(
-                  selectedReceipt.type === "transport"
-                    ? selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit
-                    : selectedReceipt.data.clientSellingPrice
-                ).toLocaleString()} دج
-              </span>
-            </div>
+            {(() => {
+              const factureTotal = selectedReceipt.type === "transport"
+                ? selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit
+                : selectedReceipt.data.clientSellingPrice;
+              const facturePaid = selectedReceipt.data.clientPaid || 0;
+              const factureRemaining = factureTotal - facturePaid;
+              return (
+                <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
+                    <span className="text-2xl font-mono font-bold text-slate-950">
+                      {factureTotal.toLocaleString()} دج
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
+                    <span className="text-slate-700">المدفوع</span>
+                    <span className="font-mono font-bold text-slate-900">{facturePaid.toLocaleString()} دج</span>
+                  </div>
+                  <div className="flex justify-between items-center text-base">
+                    <span className="font-bold text-slate-900">المتبقي</span>
+                    <span className="font-mono font-bold text-slate-950">{factureRemaining.toLocaleString()} دج</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="border-t border-slate-800 pt-8 flex justify-between text-xs">
               <div className="text-center w-1/3">
@@ -611,7 +687,7 @@ export default function App() {
               <div className="text-center w-1/3">
                 <p className="font-bold mb-8">صادق عليها المسؤول</p>
                 <div className="h-0.5 bg-slate-300 w-32 mx-auto"></div>
-                <p className="font-mono text-[10px] text-slate-500 mt-1">Lalaoui A. / Bilal R.</p>
+                <p className="font-mono text-[10px] text-slate-500 mt-1">لعلاوي عبد المالك</p>
               </div>
             </div>
 
@@ -631,11 +707,11 @@ export default function App() {
 
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-700 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/10">
-                  <img src={logoUrl} alt="Company Logo" width={60} height={60} className="object-contain" />
+                  <img src={logoUrl} alt="شعار الشركة" width={60} height={60} className="object-contain" />
                 </div>
                 <div>
                   <h1 className="text-2xl font-black tracking-tight font-display bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
-                    <span>نقل وتوزيع البضائع لعلوي عبد المالك</span>
+                    <span>نقل وتوزيع البضائع لعلاوي عبد المالك</span>
                     <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full font-sans tracking-wide">بيئة آمنة</span>
                   </h1>
                   <p className="text-xs text-slate-400 font-sans mt-0.5 flex items-center gap-1">
@@ -649,7 +725,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <div className="hidden md:flex flex-col text-left px-3 py-1 bg-slate-800 border border-slate-700/80 rounded-lg text-xs leading-tight">
                   <span className="text-slate-400 font-sans text-right">المسؤول</span>
-                  <span className="text-white font-mono font-bold">السيد لعلوي عبد المالك</span>
+                  <span className="text-white font-mono font-bold">السيد لعلاوي عبد المالك</span>
                 </div>
 
                 <button
@@ -704,7 +780,7 @@ export default function App() {
                 </div>
 
                 <h2 className="text-xl sm:text-2xl font-extrabold text-white font-display">
-                  معادلة صافي التدفق المالي للشركة (Company Net Cashflow)
+                  معادلة صافي التدفق المالي للشركة
                 </h2>
 
                 {/* Mathematical visual schema */}
@@ -864,16 +940,16 @@ export default function App() {
                 className="space-y-6"
               >
                 {/* Visual KPI Row */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">عدد الرحلات الجارية (Total Trips)</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">عدد الرحلات الجارية</span>
                     <span className="text-3xl font-black font-mono text-blue-400 block mt-1">{filteredClientTrips.length}</span>
                     <span className="text-[10px] text-slate-500 mt-0.5">رحلة مرصودة للعملاء الفعليين</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي الإيرادات (Gross Revenue)</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي الإيرادات</span>
                       <TrendingUp className="h-4 w-4 text-emerald-400" />
                     </div>
                     <span className="text-2xl font-black font-mono text-emerald-400 block mt-1">{tab1Stats.grossRevenue.toLocaleString()} دج</span>
@@ -882,7 +958,7 @@ export default function App() {
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">مستحقات السائقين (Driver Payouts)</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">مستحقات السائقين</span>
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
                     <span className="text-2xl font-black font-mono text-blue-400 block mt-1">{tab1Stats.driverPayout.toLocaleString()} دج</span>
@@ -891,19 +967,37 @@ export default function App() {
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">الربح الصافي للشركة (Net Margin)</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">الربح الصافي للشركة</span>
                       <PiggyBank className="h-4 w-4 text-cyan-400" />
                     </div>
                     <span className="text-2xl font-black font-mono text-cyan-300 block mt-1">{tab1Stats.netMargin.toLocaleString()} دج</span>
                     <span className="text-[10px] text-slate-500">الهامش الباقي لخزانة المؤسسة</span>
                   </div>
+
+                  <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي على العملاء</span>
+                      <AlertCircle className="h-4 w-4 text-amber-400" />
+                    </div>
+                    <span className="text-2xl font-black font-mono text-amber-400 block mt-1">{tab1Stats.clientOutstanding.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500">مبالغ لم يسددها العملاء بعد</span>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي للسائقين</span>
+                      <AlertCircle className="h-4 w-4 text-rose-400" />
+                    </div>
+                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab1Stats.driverOutstanding.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500">مستحقات لم تُدفع للسائقين بعد</span>
+                  </div>
                 </div>
 
-                {/* Sub-visual details: Stacked cost split chart & action bar */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Main workspace: records table first (full width), chart below */}
+                <div className="flex flex-col gap-6">
 
                   {/* Cost Split stacked bar chart */}
-                  <div className="lg:col-span-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
+                  <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
                       <h4 className="text-sm font-bold text-white mb-1">توزيع التكلفة الصافي لكل رحلة</h4>
                       <p className="text-[10px] text-slate-400 mb-4">أشرطة تظهر انقسام العوائد بين الشاحنة، السائق وهامش المؤسسة</p>
@@ -919,9 +1013,9 @@ export default function App() {
                             <XAxis type="number" stroke="#64748b" fontSize={9} />
                             <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={9} width={45} />
                             <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155" }} />
-                            <Bar dataKey="تكلفة الشاحنة (Truck Cost)" stackId="a" fill="#3b82f6" />
-                            <Bar dataKey="مستحقات السائق (Driver Cut)" stackId="a" fill="#10b981" />
-                            <Bar dataKey="هامش الشركة (Company Profit)" stackId="a" fill="#06b6d4" />
+                            <Bar dataKey="تكلفة الشاحنة" stackId="a" fill="#3b82f6" />
+                            <Bar dataKey="مستحقات السائق" stackId="a" fill="#10b981" />
+                            <Bar dataKey="هامش الشركة" stackId="a" fill="#06b6d4" />
                           </BarChart>
                         </ResponsiveContainer>
                       )}
@@ -944,7 +1038,7 @@ export default function App() {
                   </div>
 
                   {/* Shipment/Cargo Table Ledger */}
-                  <div className="lg:col-span-8 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
+                  <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-bold text-white">تفاصيل الشحنات والمطالبات</h4>
@@ -958,7 +1052,7 @@ export default function App() {
                       </div>
 
                       <div className="overflow-x-auto">
-                        <table className="w-full text-right text-xs">
+                        <table className="w-full text-right text-sm">
                           <thead>
                             <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-slate-950">
                               <th className="p-3">رقم السند</th>
@@ -967,13 +1061,15 @@ export default function App() {
                               <th className="p-3">تفاصيل النقل</th>
                               <th className="p-3">الحمولة بالطن</th>
                               <th className="p-3">التعريفة الإجمالية</th>
+                              <th className="p-3">مدفوعات العميل</th>
+                              <th className="p-3">السائق ومدفوعاته</th>
                               <th className="p-3 text-left">أدوات</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
                             {filteredClientTrips.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="p-6 text-center text-slate-500">لا توجد سجلات رحلات مطابقة للتصفية الحالية.</td>
+                                <td colSpan={9} className="p-6 text-center text-slate-500">لا توجد سجلات رحلات مطابقة للتصفية الحالية.</td>
                               </tr>
                             ) : (
                               filteredClientTrips.map(trip => {
@@ -999,12 +1095,23 @@ export default function App() {
                                     <td className="p-3 font-mono text-slate-100">{trip.totalTonnage} طن</td>
                                     <td className="p-3 font-mono font-bold text-emerald-400">{totalCost.toLocaleString()} دج</td>
                                     <td className="p-3">
+                                      <div className="font-mono text-slate-300">{(trip.clientPaid || 0).toLocaleString()} دج</div>
+                                      <div className="mt-1"><PaymentBadge paid={trip.clientPaid || 0} total={totalCost} /></div>
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="font-bold text-slate-100">{trip.driverName || "—"}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                        {(trip.driverPaid || 0).toLocaleString()} / {trip.driverCut.toLocaleString()} دج
+                                      </div>
+                                      <div className="mt-1"><PaymentBadge paid={trip.driverPaid || 0} total={trip.driverCut} /></div>
+                                    </td>
+                                    <td className="p-3">
                                       <div className="flex items-center gap-1.5 justify-end">
 
                                         <button
                                           onClick={() => handleOpenReceipt("transport", trip)}
                                           className="p-1 px-2.5 rounded bg-slate-850 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-300 transition flex items-center gap-1"
-                                          title="طباعة وتحميل الوصل المحلي والـ PDF"
+                                          title="طباعة الوصل"
                                         >
                                           <Printer className="h-3 w-3" />
                                           <span>وصل</span>
@@ -1051,16 +1158,16 @@ export default function App() {
                 className="space-y-6"
               >
                 {/* Visual KPI Row */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">إجمالي مبيعات الزبائن (Turnover)</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">إجمالي مبيعات الزبائن</span>
                     <span className="text-3xl font-black font-mono text-cyan-400 block mt-1">{tab2Stats.tradingTurnover.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">حجم تعاملات التوريد الكلي للـ Materials</span>
+                    <span className="text-[10px] text-slate-500">حجم تعاملات التوريد الكلي للمواد</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">رأس المال والمشتريات (Capital Outlay)</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">رأس المال والمشتريات</span>
                       <TrendingDown className="h-4 w-4 text-rose-400" />
                     </div>
                     <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab2Stats.capitalOutlay.toLocaleString()} دج</span>
@@ -1069,7 +1176,7 @@ export default function App() {
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">نقل ظاهر صريح (Visible Freight)</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">أجور النقل الظاهرة</span>
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
                     <span className="text-2xl font-black font-mono text-blue-400 block mt-1">
@@ -1080,7 +1187,7 @@ export default function App() {
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي ربح المعاملة (True Profit)</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي الربح الحقيقي</span>
                       <ProfitIcon className="h-4 w-4 text-emerald-400" />
                     </div>
                     <span className="text-2xl font-black font-mono text-emerald-400 block mt-1">{tab2Stats.totalTrueProfit.toLocaleString()} دج</span>
@@ -1089,16 +1196,34 @@ export default function App() {
                       <span>يشمل الكسب المستتر والهامش الظاهر</span>
                     </span>
                   </div>
+
+                  <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي على العملاء</span>
+                      <AlertCircle className="h-4 w-4 text-amber-400" />
+                    </div>
+                    <span className="text-2xl font-black font-mono text-amber-400 block mt-1">{tab2Stats.clientOutstanding.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500">مبالغ لم يسددها الزبائن بعد</span>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي للسائقين</span>
+                      <AlertCircle className="h-4 w-4 text-rose-400" />
+                    </div>
+                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab2Stats.driverOutstanding.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500">مستحقات لم تُدفع للسائقين بعد</span>
+                  </div>
                 </div>
 
-                {/* Sub-visual details for Trading Comparisons */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Main workspace: records table first (full width), chart below */}
+                <div className="flex flex-col gap-6">
 
                   {/* Sourcing Cost vs Final selling Combo */}
-                  <div className="lg:col-span-5 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
+                  <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">مقارنة كلفة السلع (Sourcing) بمقابل عوائد البيع (Selling)</h4>
-                      <p className="text-[10px] text-slate-400 mb-4">يعكس بوضوح الكفاءة النقدية للشركة وإجمالي الكسب المستتر (Hidden Margins)</p>
+                      <h4 className="text-sm font-bold text-white mb-1">مقارنة كلفة شراء السلع بعوائد البيع</h4>
+                      <p className="text-[10px] text-slate-400 mb-4">يعكس بوضوح الكفاءة النقدية للشركة وإجمالي الكسب المستتر</p>
                     </div>
 
                     <div className="h-64 w-full">
@@ -1111,9 +1236,9 @@ export default function App() {
                             <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
                             <YAxis stroke="#64748b" fontSize={9} />
                             <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155" }} />
-                            <Bar dataKey="تكلفة شراء المادة (Sourcing Cost)" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
-                            <Bar dataKey="سعر البيع النهائي (Selling Combo)" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
-                            <Line type="monotone" dataKey="إجمالي الربح الفعلي (True Profit)" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                            <Bar dataKey="تكلفة شراء المادة" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
+                            <Bar dataKey="سعر البيع النهائي" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                            <Line type="monotone" dataKey="إجمالي الربح الفعلي" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
                           </ComposedChart>
                         </ResponsiveContainer>
                       )}
@@ -1127,7 +1252,7 @@ export default function App() {
                   </div>
 
                   {/* Resale ledger records */}
-                  <div className="lg:col-span-7 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
+                  <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-bold text-white">إعادة بيع وتوريد السلع</h4>
@@ -1141,22 +1266,24 @@ export default function App() {
                       </div>
 
                       <div className="overflow-x-auto">
-                        <table className="w-full text-right text-xs">
+                        <table className="w-full text-right text-sm">
                           <thead>
                             <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-slate-950">
                               <th className="p-3">رقم العملية</th>
                               <th className="p-3">التاريخ</th>
                               <th className="p-3">الزبون النهائي</th>
                               <th className="p-3">تفاصيل الأسعار</th>
-                              <th className="p-3">مستتر (Hidden)</th>
+                              <th className="p-3">الهامش المستتر</th>
                               <th className="p-3">إجمالي الكسب الحقيقي</th>
+                              <th className="p-3">مدفوعات العميل</th>
+                              <th className="p-3">السائق ومدفوعاته</th>
                               <th className="p-3 text-left">أدوات</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
                             {filteredResaleTxs.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="p-6 text-center text-slate-500">لا توجد صفقات تجارية مسجلة.</td>
+                                <td colSpan={9} className="p-6 text-center text-slate-500">لا توجد صفقات تجارية مسجلة.</td>
                               </tr>
                             ) : (
                               filteredResaleTxs.map(tx => {
@@ -1185,6 +1312,17 @@ export default function App() {
                                     </td>
                                     <td className="p-3 font-mono font-bold text-emerald-400">
                                       {totalTrueProfit.toLocaleString()} دج
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="font-mono text-slate-300">{(tx.clientPaid || 0).toLocaleString()} دج</div>
+                                      <div className="mt-1"><PaymentBadge paid={tx.clientPaid || 0} total={tx.clientSellingPrice} /></div>
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="font-bold text-slate-100">{tx.driverName || "—"}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                        {(tx.driverPaid || 0).toLocaleString()} / {tx.driverCost.toLocaleString()} دج
+                                      </div>
+                                      <div className="mt-1"><PaymentBadge paid={tx.driverPaid || 0} total={tx.driverCost} /></div>
                                     </td>
                                     <td className="p-3">
                                       <div className="flex items-center gap-1.5 justify-end">
@@ -1240,19 +1378,19 @@ export default function App() {
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">سجلات الأعباء الكلية (Expense Items)</span>
+                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">سجلات الأعباء الكلية</span>
                     <span className="text-3xl font-black font-mono text-rose-400 block mt-1">{filteredExpenses.length}</span>
                     <span className="text-[10px] text-slate-500">عمليّة صرف تشغيلية مسجلة</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">إجمالي المصاريف والمحروقات (Burn Rate)</span>
+                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">إجمالي المصاريف والمحروقات</span>
                     <span className="text-3xl font-black font-mono text-rose-500 block mt-1">{tab3Stats.totalOverhead.toLocaleString()} دج</span>
                     <span className="text-[10px] text-slate-400">تدفق مالي هالك للرواتب وعقود الوقود</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">الأعباء المعلّقة (Pending Expenses)</span>
+                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">الأعباء المعلّقة</span>
                     <span className="text-2xl font-black font-mono text-amber-500 block">
                       {filteredExpenses.filter(e => e.status === "Pending").reduce((sum, e) => sum + e.amount, 0).toLocaleString()} دج
                     </span>
@@ -1260,10 +1398,10 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="flex flex-col gap-6">
 
                   {/* Expense Breakdown Categories */}
-                  <div className="lg:col-span-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
+                  <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
                       <h4 className="text-sm font-bold text-white mb-1">تقسيم النفقات التشغيلية</h4>
                       <p className="text-[10px] text-slate-400 mb-4">عرض مرئي للأعباء التي تم كبحها أو صرفها من الميزانية الكلية</p>
@@ -1308,7 +1446,7 @@ export default function App() {
                   </div>
 
                   {/* Expenses Ledger */}
-                  <div className="lg:col-span-8 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
+                  <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-bold text-white">جدول المصاريف والصيانات والأجور</h4>
@@ -1322,7 +1460,7 @@ export default function App() {
                       </div>
 
                       <div className="overflow-x-auto">
-                        <table className="w-full text-right text-xs">
+                        <table className="w-full text-right text-sm">
                           <thead>
                             <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-slate-950">
                               <th className="p-3">معرف المصرف</th>
@@ -1430,7 +1568,7 @@ export default function App() {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">رقم سند النقل (Trip ID)</label>
+                        <label className="block text-slate-400 mb-1">رقم سند النقل</label>
                         <input
                           type="text"
                           required
@@ -1452,16 +1590,28 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-slate-400 mb-1">اسم العميل بالكامل</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="مثال: شركة بوعمامة للبناء"
-                        value={tripForm.clientName}
-                        onChange={e => setTripForm(p => ({ ...p, clientName: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
-                      />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">اسم العميل بالكامل</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="مثال: شركة بوعمامة للبناء"
+                          value={tripForm.clientName}
+                          onChange={e => setTripForm(p => ({ ...p, clientName: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">اسم السائق</label>
+                        <input
+                          type="text"
+                          placeholder="السائق المكلف بالرحلة"
+                          value={tripForm.driverName}
+                          onChange={e => setTripForm(p => ({ ...p, driverName: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -1554,6 +1704,37 @@ export default function App() {
                         <strong className="text-emerald-400">{computedFormTotalTransportFee.toLocaleString()} دج</strong>
                       </div>
                     </div>
+
+                    {/* Payment tracking: client + driver amounts paid so far */}
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                      <span className="text-[10px] text-amber-400 font-bold block">متابعة المدفوعات</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-slate-500 mb-1">المدفوع من العميل</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={tripForm.clientPaid}
+                            onChange={e => setTripForm(p => ({ ...p, clientPaid: parseInt(e.target.value) || 0 }))}
+                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-500 mb-1">المدفوع للسائق</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={tripForm.driverPaid}
+                            onChange={e => setTripForm(p => ({ ...p, driverPaid: parseInt(e.target.value) || 0 }))}
+                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="pt-1 text-[10px] flex justify-between text-slate-400">
+                        <span>المتبقي على العميل: <strong className={(computedFormTotalTransportFee - (Number(tripForm.clientPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{(computedFormTotalTransportFee - (Number(tripForm.clientPaid) || 0)).toLocaleString()} دج</strong></span>
+                        <span>المتبقي للسائق: <strong className={((Number(tripForm.driverCut) || 0) - (Number(tripForm.driverPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{((Number(tripForm.driverCut) || 0) - (Number(tripForm.driverPaid) || 0)).toLocaleString()} دج</strong></span>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -1561,7 +1742,7 @@ export default function App() {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">رقم عملية التوريد (ID)</label>
+                        <label className="block text-slate-400 mb-1">رقم عملية التوريد</label>
                         <input
                           type="text"
                           required
@@ -1595,16 +1776,28 @@ export default function App() {
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-slate-400 mb-1">الوجهة (المكان الذي ستُنقل إليه السلعة)</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="موقع التسليم النهائي"
-                        value={resaleForm.destination}
-                        onChange={e => setResaleForm(p => ({ ...p, destination: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
-                      />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">الوجهة (المكان الذي ستُنقل إليه السلعة)</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="موقع التسليم النهائي"
+                          value={resaleForm.destination}
+                          onChange={e => setResaleForm(p => ({ ...p, destination: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">اسم السائق</label>
+                        <input
+                          type="text"
+                          placeholder="السائق المكلف بالتوصيل"
+                          value={resaleForm.driverName}
+                          onChange={e => setResaleForm(p => ({ ...p, driverName: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -1631,7 +1824,7 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label className="block text-slate-400 mb-1">السعر البيعي الإجمالي للزبون (Combo Price)</label>
+                      <label className="block text-slate-400 mb-1">السعر البيعي الإجمالي للزبون</label>
                       <input
                         type="number"
                         required
@@ -1678,8 +1871,39 @@ export default function App() {
                         </div>
                       </div>
                       <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                        <span>قيمة الكسب المستتر (Hidden): <strong className="text-amber-400">{tempHiddenMargin.toLocaleString()} دج</strong></span>
+                        <span>قيمة الكسب المستتر: <strong className="text-amber-400">{tempHiddenMargin.toLocaleString()} دج</strong></span>
                         <span>إجمالي صافي الربح الحقيقي: <strong className="text-emerald-400">{computedFormTotalTrueProfit.toLocaleString()} دج</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Payment tracking: client + driver amounts paid so far */}
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                      <span className="text-[10px] text-amber-400 font-bold block">متابعة المدفوعات</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-slate-500 mb-1">المدفوع من العميل</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={resaleForm.clientPaid}
+                            onChange={e => setResaleForm(p => ({ ...p, clientPaid: parseInt(e.target.value) || 0 }))}
+                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-500 mb-1">المدفوع للسائق</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={resaleForm.driverPaid}
+                            onChange={e => setResaleForm(p => ({ ...p, driverPaid: parseInt(e.target.value) || 0 }))}
+                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="pt-1 text-[10px] flex justify-between text-slate-400">
+                        <span>المتبقي على العميل: <strong className={((Number(resaleForm.clientSellingPrice) || 0) - (Number(resaleForm.clientPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{((Number(resaleForm.clientSellingPrice) || 0) - (Number(resaleForm.clientPaid) || 0)).toLocaleString()} دج</strong></span>
+                        <span>المتبقي للسائق: <strong className={((Number(resaleForm.driverCost) || 0) - (Number(resaleForm.driverPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{((Number(resaleForm.driverCost) || 0) - (Number(resaleForm.driverPaid) || 0)).toLocaleString()} دج</strong></span>
                       </div>
                     </div>
                   </div>
@@ -1689,7 +1913,7 @@ export default function App() {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">رقم الفاتورة / المصرف (ID)</label>
+                        <label className="block text-slate-400 mb-1">رقم الفاتورة / المصرف</label>
                         <input
                           type="text"
                           required
@@ -1754,8 +1978,8 @@ export default function App() {
                           onChange={e => setExpenseForm(p => ({ ...p, status: e.target.value as 'Paid' | 'Pending' }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         >
-                          <option value="Paid">مدفوعة (Paid)</option>
-                          <option value="Pending">قيد الدراسة والمطالبة (Pending)</option>
+                          <option value="Paid">مدفوعة</option>
+                          <option value="Pending">قيد الدراسة والمطالبة</option>
                         </select>
                       </div>
                     </div>
@@ -1806,7 +2030,7 @@ export default function App() {
                     className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition shadow"
                   >
                     <Printer className="h-4 w-4" />
-                    <span>طباعة أو تحميل PDF (Print)</span>
+                    <span>طباعة الوصل</span>
                   </button>
                   <button
                     onClick={() => setIsReceiptOpen(false)}
@@ -1822,8 +2046,8 @@ export default function App() {
 
                 <div className="flex justify-between items-start border-b border-slate-300 pb-4">
                   <div>
-                    <h2 className="text-xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلوي عبد المالك</h2>
-                    <p className="text-[10px] text-slate-500 mt-1 uppercase">Bilingual Internal Freight Receipt</p>
+                    <h2 className="text-xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلاوي عبد المالك</h2>
+                    <p className="text-[10px] text-slate-500 mt-1 uppercase">وصل شحن داخلي رسمي</p>
                     <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
                   </div>
                   <div className="text-left">
@@ -1846,26 +2070,40 @@ export default function App() {
 
                     <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-2">
                       <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 flex items-center justify-between">
-                        <span>منشور تكلفة الشحن (Freight Invoicing)</span>
-                        <span className="text-[9px] text-slate-400">عملة الحساب: دج (DZD)</span>
+                        <span>منشور تكلفة الشحن</span>
+                        <span className="text-[9px] text-slate-400">عملة الحساب: الدينار الجزائري</span>
                       </h4>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>صرف كراء المركبة (Truck Lease):</span>
+                        <span>صرف كراء المركبة:</span>
                         <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} دج</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>أجرة قنوات السائق (Driver Cut):</span>
+                        <span>أجرة السائق:</span>
                         <span className="font-mono">{selectedReceipt.data.driverCut.toLocaleString()} دج</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>أرباح المؤسسة الصافية (Company net cut):</span>
+                        <span>أرباح المؤسسة الصافية:</span>
                         <span className="font-mono text-cyan-800 font-bold">+{selectedReceipt.data.companyProfit.toLocaleString()} دج</span>
                       </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900 bg-slate-105">
-                        <span>المجموع الفاتورة الكلي (Master Total):</span>
+                        <span>مجموع الفاتورة الكلي:</span>
                         <span className="font-mono text-emerald-600 text-sm">
                           {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit).toLocaleString()} دج
                         </span>
+                      </div>
+                      <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
+                        <span>المدفوع من العميل:</span>
+                        <span className="font-mono">{(selectedReceipt.data.clientPaid || 0).toLocaleString()} دج</span>
+                      </div>
+                      <div className="flex justify-between py-1 font-bold">
+                        <span className="text-slate-800">المتبقي على العميل:</span>
+                        <span className="font-mono text-amber-700">
+                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} دج
+                        </span>
+                      </div>
+                      <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
+                        <span>السائق ({selectedReceipt.data.driverName || "غير محدد"}) — المدفوع له:</span>
+                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCut.toLocaleString()} دج</span>
                       </div>
                     </div>
                   </div>
@@ -1876,37 +2114,51 @@ export default function App() {
                       <div><span className="text-slate-500">الوجهة المستهدفة:</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
                       <div><span className="text-slate-500">الحمولة الكلية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong></div>
                       <div><span className="text-slate-500">سعر شراء المصنع (للطن):</span> <strong className="text-slate-900">{selectedReceipt.data.factoryPurchasePrice.toLocaleString()} دج / طن</strong></div>
-                      <div><span className="text-slate-500">كلفة السلع الكلية (Sourcing Cost):</span> <strong className="text-slate-900">{(selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage).toLocaleString()} دج</strong></div>
+                      <div><span className="text-slate-500">كلفة السلع الكلية:</span> <strong className="text-slate-900">{(selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage).toLocaleString()} دج</strong></div>
                     </div>
 
                     <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-2">
                       <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 flex items-center justify-between">
                         <span>تحليل الهياكل والتسعير اللوجستي الشامل</span>
-                        <span className="text-[10px] text-slate-400 font-mono">ID: {selectedReceipt.data.id}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">رقم: {selectedReceipt.data.id}</span>
                       </h4>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>كراء الشاحنة البرية (Truck Cost):</span>
+                        <span>كراء الشاحنة البرية:</span>
                         <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} دج</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>نظير مجهود السائق (Driver Cost):</span>
+                        <span>أجرة السائق:</span>
                         <span className="font-mono">{selectedReceipt.data.driverCost.toLocaleString()} دج</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>هامش النقل الصريح البارز (Explicit Profit):</span>
+                        <span>هامش النقل الصريح:</span>
                         <span className="font-mono text-slate-700">+{selectedReceipt.data.explicitProfit.toLocaleString()} دج</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 font-bold bg-amber-50 px-2 rounded">
-                        <span className="text-amber-800">الأرباح المستترة المحققة من التسعير (Hidden Margin):</span>
+                        <span className="text-amber-800">الأرباح المستترة من التسعير:</span>
                         <span className="font-mono text-amber-700">
                           {+(selectedReceipt.data.clientSellingPrice - ((selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage) + selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit)).toLocaleString()} دج
                         </span>
                       </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900">
-                        <span>سعر البيع النهائي المتكامل (Combo selling price):</span>
+                        <span>سعر البيع النهائي الإجمالي:</span>
                         <span className="font-mono text-emerald-600 text-sm">
                           {selectedReceipt.data.clientSellingPrice.toLocaleString()} دج
                         </span>
+                      </div>
+                      <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
+                        <span>المدفوع من الزبون:</span>
+                        <span className="font-mono">{(selectedReceipt.data.clientPaid || 0).toLocaleString()} دج</span>
+                      </div>
+                      <div className="flex justify-between py-1 font-bold">
+                        <span className="text-slate-800">المتبقي على الزبون:</span>
+                        <span className="font-mono text-amber-700">
+                          {(selectedReceipt.data.clientSellingPrice - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} دج
+                        </span>
+                      </div>
+                      <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
+                        <span>السائق ({selectedReceipt.data.driverName || "غير محدد"}) — المدفوع له:</span>
+                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCost.toLocaleString()} دج</span>
                       </div>
                     </div>
                   </div>

@@ -58,6 +58,11 @@ export async function fetchTripStats(params?: {
   return request(`/trips/stats${query}`);
 }
 
+export async function fetchNextTripId(): Promise<string> {
+  const data = await request<{ nextId: string }>('/trips/next-id');
+  return data.nextId;
+}
+
 export async function createTrip(trip: ClientTransportTrip): Promise<ClientTransportTrip> {
   return request<ClientTransportTrip>('/trips', {
     method: 'POST',
@@ -98,6 +103,11 @@ export async function fetchResaleStats(params?: {
   return request(`/resales/stats${query}`);
 }
 
+export async function fetchNextResaleId(): Promise<string> {
+  const data = await request<{ nextId: string }>('/resales/next-id');
+  return data.nextId;
+}
+
 export async function createResale(resale: MaterialResaleTx): Promise<MaterialResaleTx> {
   return request<MaterialResaleTx>('/resales', {
     method: 'POST',
@@ -136,6 +146,11 @@ export async function fetchExpenseStats(params?: {
 }): Promise<{ totalOverhead: number; categoryBreakdown: Record<string, number>; pendingAmount: number }> {
   const query = buildQueryString(params);
   return request(`/expenses/stats${query}`);
+}
+
+export async function fetchNextExpenseId(): Promise<string> {
+  const data = await request<{ nextId: string }>('/expenses/next-id');
+  return data.nextId;
 }
 
 export async function createExpense(expense: OtherExpense): Promise<OtherExpense> {

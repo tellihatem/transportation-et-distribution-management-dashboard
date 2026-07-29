@@ -17,14 +17,16 @@ const TABLE_COLUMN_MAP: Record<string, Record<string, string>> = {
     origin_factory: 'origin_factory', destination: 'destination',
     material_type: 'material_type', total_tonnage: 'total_tonnage',
     truck_cost: 'truck_cost', driver_cut: 'driver_cut',
-    company_profit: 'company_profit', created_at: 'created_at',
-    updated_at: 'updated_at',
+    company_profit: 'company_profit', driver_name: 'driver_name',
+    client_paid: 'client_paid', driver_paid: 'driver_paid',
+    created_at: 'created_at', updated_at: 'updated_at',
   },
   material_resales: {
     id: 'id', date: 'date', end_client: 'end_client', destination: 'destination',
     factory_purchase_price: 'factory_purchase_price', total_tonnage: 'total_tonnage',
     client_selling_price: 'client_selling_price', truck_cost: 'truck_cost',
     driver_cost: 'driver_cost', explicit_profit: 'explicit_profit',
+    driver_name: 'driver_name', client_paid: 'client_paid', driver_paid: 'driver_paid',
     created_at: 'created_at', updated_at: 'updated_at',
   },
   expenses: {

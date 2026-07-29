@@ -1,21 +1,18 @@
 ; build/installer.nsh — electron-builder's default nsis.include path.
 ;
-; Registers our self-signed code-signing certificate as trusted for the
-; current Windows user, so Authenticode recognizes the installer's signature
-; instead of showing "Unknown Publisher". Runs per-user (no elevation) to
-; match nsis.perMachine: false.
+; Registers our self-signed code-signing certificate in the current user's
+; "Trusted Publishers" store so Windows recognizes the publisher name.
+; Runs per-user (no elevation) to match nsis.perMachine: false.
 ;
-; A self-signed certificate is its own root, so Windows only reports the
-; Authenticode signature as "Valid" once this exact cert is present in the
-; user's Trusted Root store (TrustedPublisher alone is not sufficient for
-; that check, verified empirically during setup). The certificate's
-; Enhanced Key Usage is restricted to Code Signing only (no TLS/server auth,
-; no general CA capability), so this grants no broader trust than intended.
+; Deliberately does NOT touch the Trusted Root store: Windows always requires
+; an interactive consent dialog to install a root certificate and refuses to
+; do it silently ("UI is not allowed in this operation"), which HANGS a silent
+; install indefinitely. Establishing full chain trust is therefore a separate,
+; one-time manual step — run scripts/trust-certificate.ps1 on the target
+; machine. See docs/BUILD_AND_SIGN.md.
 
 !macro customInstall
-  DetailPrint "Registering code-signing certificate as trusted..."
-  nsExec::ExecToLog '"$SYSDIR\certutil.exe" -user -addstore Root "$INSTDIR\resources\logistics-dashboard.cer"'
-  Pop $0
+  DetailPrint "تسجيل شهادة التوقيع الرقمي..."
   nsExec::ExecToLog '"$SYSDIR\certutil.exe" -user -addstore TrustedPublisher "$INSTDIR\resources\logistics-dashboard.cer"'
   Pop $0
   ${if} $0 != 0
@@ -24,9 +21,7 @@
 !macroend
 
 !macro customUnInstall
-  DetailPrint "Removing code-signing certificate from trust stores..."
-  nsExec::ExecToLog '"$SYSDIR\certutil.exe" -user -delstore Root "Hatem Telli"'
-  Pop $0
+  DetailPrint "إزالة شهادة التوقيع الرقمي..."
   nsExec::ExecToLog '"$SYSDIR\certutil.exe" -user -delstore TrustedPublisher "Hatem Telli"'
   Pop $0
 !macroend

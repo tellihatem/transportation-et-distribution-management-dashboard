@@ -86,13 +86,13 @@ export function seedIfEmpty(): void {
   console.log('[DB] Seeding database with initial data...');
 
   const insertTrip = db.prepare(`
-    INSERT OR IGNORE INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, truck_cost, driver_cut, company_profit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, truck_cost, driver_cut, company_profit, driver_name, client_paid, driver_paid)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertResale = db.prepare(`
-    INSERT OR IGNORE INTO material_resales (id, date, end_client, destination, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO material_resales (id, date, end_client, destination, factory_purchase_price, total_tonnage, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, client_paid, driver_paid)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertExpense = db.prepare(`
@@ -102,17 +102,17 @@ export function seedIfEmpty(): void {
 
   const seedTransaction = db.transaction(() => {
     // Client Transport Trips
-    insertTrip.run('TR-202', '2026-06-01', 'مجموعة حداد للأشغال العامة', 'مصنع الإسمنت سيدي بلعباس', 'ورشة الطريق السريع تلمسان', 'إسمنت رمادي 42.5', 32.5, 15000, 5000, 6000);
-    insertTrip.run('TR-203', '2026-06-03', 'شركة بوعمامة للبناء', 'محجرة الغرب تلموني', 'موقع 1500 مسكن عدل', 'حصى غسيل 0/15', 40.0, 12000, 4000, 4500);
-    insertTrip.run('TR-204', '2026-06-05', 'مؤسسة بلحول للري', 'مركب الحديد و الصلب وهران', 'قناة جر المياه سفيزف', 'أنابيب حديد قطر 500', 15.0, 20000, 6000, 8000);
-    insertTrip.run('TR-205', '2026-06-07', 'الحاج بلخير للمقاولات', 'محجرة الرمال تيموشنت', 'منطقة النشاطات عين تموشنت', 'رمل بناء ناعم', 28.0, 8000, 3500, 3500);
-    insertTrip.run('TR-206', '2026-06-09', 'مؤسسة الأشغال الكبرى العيد', 'مصنع الأجر السانية', 'حي السلام بلعباس', 'أجر أحمر 8 عيون', 30.0, 14000, 4500, 5500);
+    insertTrip.run('TR-202', '2026-06-01', 'مجموعة حداد للأشغال العامة', 'مصنع الإسمنت سيدي بلعباس', 'ورشة الطريق السريع تلمسان', 'إسمنت رمادي 42.5', 32.5, 15000, 5000, 6000, 'بلال رحماني', 0, 0);
+    insertTrip.run('TR-203', '2026-06-03', 'شركة بوعمامة للبناء', 'محجرة الغرب تلموني', 'موقع 1500 مسكن عدل', 'حصى غسيل 0/15', 40.0, 12000, 4000, 4500, 'عمر بوزيد', 0, 0);
+    insertTrip.run('TR-204', '2026-06-05', 'مؤسسة بلحول للري', 'مركب الحديد و الصلب وهران', 'قناة جر المياه سفيزف', 'أنابيب حديد قطر 500', 15.0, 20000, 6000, 8000, 'بلال رحماني', 0, 0);
+    insertTrip.run('TR-205', '2026-06-07', 'الحاج بلخير للمقاولات', 'محجرة الرمال تيموشنت', 'منطقة النشاطات عين تموشنت', 'رمل بناء ناعم', 28.0, 8000, 3500, 3500, 'حسين مقراني', 0, 0);
+    insertTrip.run('TR-206', '2026-06-09', 'مؤسسة الأشغال الكبرى العيد', 'مصنع الأجر السانية', 'حي السلام بلعباس', 'أجر أحمر 8 عيون', 30.0, 14000, 4500, 5500, 'عمر بوزيد', 0, 0);
 
     // Material Resale Transactions
-    insertResale.run('RS-801', '2026-06-02', 'المقاول الأخضر لتهيئة الحدائق', 'حديقة المسيلة الحضرية', 1200, 45.0, 115000, 16000, 5000, 7000);
-    insertResale.run('RS-802', '2026-06-04', 'شركة جيل المستقبل العقارية', 'مشروع سكني حي الأمل', 2500, 50.0, 220000, 22000, 7000, 11000);
-    insertResale.run('RS-803', '2026-06-06', 'مؤسسة الأشغال المائية التل', 'سد وادي التل', 1800, 35.0, 145000, 15000, 4500, 7500);
-    insertResale.run('RS-804', '2026-06-08', 'تعاونية البناء بلعباس الأنيق', 'حي التعاونية بلعباس', 1100, 60.0, 160000, 18000, 6000, 8000);
+    insertResale.run('RS-801', '2026-06-02', 'المقاول الأخضر لتهيئة الحدائق', 'حديقة المسيلة الحضرية', 1200, 45.0, 115000, 16000, 5000, 7000, 'بلال رحماني', 0, 0);
+    insertResale.run('RS-802', '2026-06-04', 'شركة جيل المستقبل العقارية', 'مشروع سكني حي الأمل', 2500, 50.0, 220000, 22000, 7000, 11000, 'حسين مقراني', 0, 0);
+    insertResale.run('RS-803', '2026-06-06', 'مؤسسة الأشغال المائية التل', 'سد وادي التل', 1800, 35.0, 145000, 15000, 4500, 7500, 'عمر بوزيد', 0, 0);
+    insertResale.run('RS-804', '2026-06-08', 'تعاونية البناء بلعباس الأنيق', 'حي التعاونية بلعباس', 1100, 60.0, 160000, 18000, 6000, 8000, 'بلال رحماني', 0, 0);
 
     // Other Expenses
     insertExpense.run('EXP-101', '2026-06-02', 'Fuel', '01345-116-22', 18000, 'Paid');

@@ -66,8 +66,8 @@ automatically — no other config needed. The build also:
 
 - bundles `certs/logistics-dashboard.cer` as an extra resource
 - runs a custom NSIS step (`build/installer.nsh`) on install that silently
-  imports that certificate into the **current Windows user's** `Root` and
-  `TrustedPublisher` stores via `certutil -user -addstore` (no admin
+  imports that certificate into the **current Windows user's**
+  `TrustedPublisher` store via `certutil -user -addstore` (no admin
   elevation needed, matching `perMachine: false`), and removes it again on
   uninstall
 
@@ -111,18 +111,32 @@ $sig | Format-List *
   checking from: `Status` will read `UnknownError` ("terminated in a root
   certificate which is not trusted") — expected for a self-signed chain,
   and does **not** mean the signature is broken.
-- After running `certutil -user -addstore Root certs\logistics-dashboard.cer`
-  (or after actually running the installer, which does this automatically):
+- After running `scripts\trust-certificate.ps1` on that machine (see below):
   `Status` should read `Valid`.
 
-  Note: a self-signed certificate is its own root, so it must land in the
-  **Root** store (Trusted Root Certification Authorities), not just
-  `TrustedPublisher`, for Authenticode chain validation to pass — verified
-  empirically while building this. `build/installer.nsh` adds it to both.
-  The certificate's Enhanced Key Usage is restricted to Code Signing only
-  (confirmed via `certutil -dump`), so this doesn't grant it any broader
-  authority (e.g. it cannot be used to trust TLS/HTTPS certificates) even
-  though it sits in the Root store.
+### Why trusting the certificate is a separate manual step
+
+A self-signed certificate is its own root, so Authenticode only reports
+`Valid` once the certificate is in the **Trusted Root** store —
+`TrustedPublisher` alone is not enough (verified empirically).
+
+However, **Windows deliberately refuses to add a root certificate silently.**
+It always shows a "Security Warning" consent dialog, and the API rejects
+non-interactive attempts outright with *"UI is not allowed in this
+operation."* An earlier version of `build/installer.nsh` tried to do this
+during setup and **hung the installer indefinitely** waiting on that dialog —
+do not reintroduce it.
+
+So the split is:
+- The **installer** silently adds the cert to `TrustedPublisher` (no prompt,
+  cannot hang).
+- **Full chain trust** is a one-time manual step: run
+  `scripts\trust-certificate.ps1` on the target machine and click **Yes** on
+  the Windows prompt. Takes a few seconds, once per machine.
+
+The certificate's Enhanced Key Usage is restricted to Code Signing only
+(confirmed via `certutil -dump`), so trusting it does not grant any broader
+authority — it cannot be used to trust TLS/HTTPS certificates.
 
 ## Before handing the installer to the client
 

@@ -82,6 +82,18 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 /**
+ * GET /api/expenses/next-id — Next sequential expense ID (EXP-1, EXP-2, ...)
+ */
+router.get('/next-id', asyncHandler(async (_req: Request, res: Response) => {
+  const rows = db.prepare('SELECT id FROM expenses').all() as { id: string }[];
+  const max = rows.reduce((m, r) => {
+    const match = r.id.match(/(\d+)\s*$/);
+    return match ? Math.max(m, parseInt(match[1], 10)) : m;
+  }, 0);
+  res.json({ success: true, data: { nextId: `EXP-${max + 1}` } });
+}));
+
+/**
  * GET /api/expenses/:id — Single expense
  */
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {

@@ -25,10 +25,11 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
       client_name LIKE ? OR
       origin_factory LIKE ? OR
       destination LIKE ? OR
-      material_type LIKE ?
+      material_type LIKE ? OR
+      driver_name LIKE ?
     )`;
     const term = `%${search.trim()}%`;
-    params.push(term, term, term, term, term);
+    params.push(term, term, term, term, term, term);
   }
 
   if (dateStart && typeof dateStart === 'string') {
@@ -61,9 +62,9 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
   const params: any[] = [];
 
   if (search && typeof search === 'string' && search.trim()) {
-    sql += ` AND (id LIKE ? OR client_name LIKE ? OR origin_factory LIKE ? OR destination LIKE ? OR material_type LIKE ?)`;
+    sql += ` AND (id LIKE ? OR client_name LIKE ? OR origin_factory LIKE ? OR destination LIKE ? OR material_type LIKE ? OR driver_name LIKE ?)`;
     const term = `%${search.trim()}%`;
-    params.push(term, term, term, term, term);
+    params.push(term, term, term, term, term, term);
   }
   if (dateStart) { sql += ' AND date >= ?'; params.push(dateStart); }
   if (dateEnd) { sql += ' AND date <= ?'; params.push(dateEnd); }
@@ -87,6 +88,18 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 /**
+ * GET /api/trips/next-id — Next sequential trip ID (TR-1, TR-2, ...)
+ */
+router.get('/next-id', asyncHandler(async (_req: Request, res: Response) => {
+  const rows = db.prepare('SELECT id FROM client_trips').all() as { id: string }[];
+  const max = rows.reduce((m, r) => {
+    const match = r.id.match(/(\d+)\s*$/);
+    return match ? Math.max(m, parseInt(match[1], 10)) : m;
+  }, 0);
+  res.json({ success: true, data: { nextId: `TR-${max + 1}` } });
+}));
+
+/**
  * GET /api/trips/:id — Single trip
  */
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
@@ -99,7 +112,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
  * POST /api/trips — Create new trip
  */
 router.post('/', asyncHandler(async (req: Request, res: Response) => {
-  const { id, date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit } = req.body;
+  const { id, date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit, driverName, clientPaid, driverPaid } = req.body;
 
   if (!id || !date || !clientName) {
     throw createApiError('Missing required fields: id, date, clientName', 400, 'VALIDATION_ERROR');
@@ -112,9 +125,9 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   }
 
   db.prepare(`
-    INSERT INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, truck_cost, driver_cut, company_profit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, truckCost || 0, driverCut || 0, companyProfit || 0);
+    INSERT INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, truck_cost, driver_cut, company_profit, driver_name, client_paid, driver_paid)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, truckCost || 0, driverCut || 0, companyProfit || 0, driverName || '', clientPaid || 0, driverPaid || 0);
 
   const created = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(id);
 
@@ -131,15 +144,16 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
   if (!existing) throw createApiError('Trip not found', 404, 'NOT_FOUND');
 
-  const { date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit } = req.body;
+  const { date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit, driverName, clientPaid, driverPaid } = req.body;
 
   db.prepare(`
     UPDATE client_trips SET
       date = ?, client_name = ?, origin_factory = ?, destination = ?,
       material_type = ?, total_tonnage = ?, truck_cost = ?, driver_cut = ?,
-      company_profit = ?, updated_at = datetime('now'), synced_at = NULL
+      company_profit = ?, driver_name = ?, client_paid = ?, driver_paid = ?,
+      updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit, req.params.id);
+  `).run(date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit, driverName || '', clientPaid || 0, driverPaid || 0, req.params.id);
 
   const updated = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
   queueSync('client_trips', req.params.id, 'upsert', updated);
@@ -175,6 +189,9 @@ function mapRowToTrip(row: any) {
     truckCost: row.truck_cost,
     driverCut: row.driver_cut,
     companyProfit: row.company_profit,
+    driverName: row.driver_name ?? '',
+    clientPaid: row.client_paid ?? 0,
+    driverPaid: row.driver_paid ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     syncedAt: row.synced_at,
