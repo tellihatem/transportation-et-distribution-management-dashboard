@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS client_trips (
     truck_cost INTEGER NOT NULL,
     driver_cut INTEGER NOT NULL,
     company_profit INTEGER NOT NULL,
+    driver_name TEXT DEFAULT '',
+    client_paid INTEGER DEFAULT 0,
+    driver_paid INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -31,6 +34,9 @@ CREATE TABLE IF NOT EXISTS material_resales (
     truck_cost INTEGER NOT NULL,
     driver_cost INTEGER NOT NULL,
     explicit_profit INTEGER NOT NULL,
+    driver_name TEXT DEFAULT '',
+    client_paid INTEGER DEFAULT 0,
+    driver_paid INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -65,3 +71,11 @@ CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
 -- If this schema was already applied before the "destination" column existed,
 -- run this once against an existing instance:
 -- ALTER TABLE material_resales ADD COLUMN destination TEXT NOT NULL DEFAULT '';
+
+-- If this schema was applied before payment tracking existed, run once:
+-- ALTER TABLE client_trips ADD COLUMN driver_name TEXT DEFAULT '';
+-- ALTER TABLE client_trips ADD COLUMN client_paid INTEGER DEFAULT 0;
+-- ALTER TABLE client_trips ADD COLUMN driver_paid INTEGER DEFAULT 0;
+-- ALTER TABLE material_resales ADD COLUMN driver_name TEXT DEFAULT '';
+-- ALTER TABLE material_resales ADD COLUMN client_paid INTEGER DEFAULT 0;
+-- ALTER TABLE material_resales ADD COLUMN driver_paid INTEGER DEFAULT 0;

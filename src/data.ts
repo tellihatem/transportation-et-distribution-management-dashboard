@@ -17,7 +17,10 @@ export const INITIAL_CLIENT_TRIPS: ClientTransportTrip[] = [
     totalTonnage: 32.5,
     truckCost: 15000,
     driverCut: 5000,
-    companyProfit: 6000
+    companyProfit: 6000,
+    driverName: "بلال رحماني",
+    clientPaid: 0,
+    driverPaid: 0
   },
   {
     id: "TR-203",
@@ -29,7 +32,10 @@ export const INITIAL_CLIENT_TRIPS: ClientTransportTrip[] = [
     totalTonnage: 40.0,
     truckCost: 12000,
     driverCut: 4000,
-    companyProfit: 4500
+    companyProfit: 4500,
+    driverName: "عمر بوزيد",
+    clientPaid: 0,
+    driverPaid: 0
   },
   {
     id: "TR-204",
@@ -41,7 +47,10 @@ export const INITIAL_CLIENT_TRIPS: ClientTransportTrip[] = [
     totalTonnage: 15.0,
     truckCost: 20000,
     driverCut: 6000,
-    companyProfit: 8000
+    companyProfit: 8000,
+    driverName: "بلال رحماني",
+    clientPaid: 0,
+    driverPaid: 0
   },
   {
     id: "TR-205",
@@ -53,7 +62,10 @@ export const INITIAL_CLIENT_TRIPS: ClientTransportTrip[] = [
     totalTonnage: 28.0,
     truckCost: 8000,
     driverCut: 3500,
-    companyProfit: 3500
+    companyProfit: 3500,
+    driverName: "حسين مقراني",
+    clientPaid: 0,
+    driverPaid: 0
   },
   {
     id: "TR-206",
@@ -65,7 +77,10 @@ export const INITIAL_CLIENT_TRIPS: ClientTransportTrip[] = [
     totalTonnage: 30.0,
     truckCost: 14000,
     driverCut: 4500,
-    companyProfit: 5500
+    companyProfit: 5500,
+    driverName: "عمر بوزيد",
+    clientPaid: 0,
+    driverPaid: 0
   }
 ];
 
@@ -81,7 +96,10 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     clientSellingPrice: 115000, // Total selling combo to client
     truckCost: 16000,
     driverCost: 5000,
-    explicitProfit: 7000
+    explicitProfit: 7000,
+    driverName: "بلال رحماني",
+    clientPaid: 0,
+    driverPaid: 0
   },
   {
     id: "RS-802",
@@ -93,7 +111,10 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     clientSellingPrice: 220000, // Total selling combo
     truckCost: 22000,
     driverCost: 7000,
-    explicitProfit: 11000
+    explicitProfit: 11000,
+    driverName: "حسين مقراني",
+    clientPaid: 0,
+    driverPaid: 0
   },
   {
     id: "RS-803",
@@ -105,7 +126,10 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     clientSellingPrice: 145000,
     truckCost: 15000,
     driverCost: 4500,
-    explicitProfit: 7500
+    explicitProfit: 7500,
+    driverName: "عمر بوزيد",
+    clientPaid: 0,
+    driverPaid: 0
   },
   {
     id: "RS-804",
@@ -117,7 +141,10 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     clientSellingPrice: 160000,
     truckCost: 18000,
     driverCost: 6000,
-    explicitProfit: 8000
+    explicitProfit: 8000,
+    driverName: "بلال رحماني",
+    clientPaid: 0,
+    driverPaid: 0
   }
 ];
 

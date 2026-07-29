@@ -15,6 +15,9 @@ export interface ClientTransportTrip {
   truckCost: number;     // Cost paid to truck owner
   driverCut: number;     // Cost paid to driver
   companyProfit: number; // Profit kept by company
+  driverName: string;    // Which driver did the trip
+  clientPaid: number;    // Amount the client has paid so far (toward the total fee)
+  driverPaid: number;    // Amount paid to the driver so far (toward driverCut)
   // Computed field: Total Transport Fee = truckCost + driverCut + companyProfit
 }
 
@@ -30,6 +33,9 @@ export interface MaterialResaleTx {
   truckCost: number;     // Truck logistics cost
   driverCost: number;    // Driver payment
   explicitProfit: number; // Declared profit for transport
+  driverName: string;    // Which driver did the delivery
+  clientPaid: number;    // Amount the client has paid so far (toward clientSellingPrice)
+  driverPaid: number;    // Amount paid to the driver so far (toward driverCost)
   // Computed fields:
   // - Sourcing Cost = factoryPurchasePrice * totalTonnage
   // - Visible Transport Fee = truckCost + driverCost + explicitProfit

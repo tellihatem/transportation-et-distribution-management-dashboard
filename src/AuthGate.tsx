@@ -59,7 +59,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl space-y-4"
         >
           <h1 className="text-lg font-bold text-slate-100 text-center">
-            نقل وتوزيع البضائع لعلوي عبد المالك
+            نقل وتوزيع البضائع لعلاوي عبد المالك
           </h1>
           <p className="text-xs text-slate-400 text-center">أدخل كلمة المرور للدخول إلى لوحة التحكم</p>
           <input

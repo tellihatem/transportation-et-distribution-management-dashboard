@@ -17,7 +17,6 @@ config({ path: path.resolve(process.cwd(), '.env') });
 
 import db, { runMigrations, seedIfEmpty } from './database';
 import { errorHandler } from './middleware/error-handler';
-import { requireAuth } from './middleware/auth';
 import { processSyncQueue } from './sync/replicator';
 
 // Route imports
@@ -123,8 +122,10 @@ app.get('/api/health', (_req, res) => {
 });
 
 // --- API Routes ---
+// Auth is disabled: this app is deployed to a single trusted client machine,
+// so there's no login gate in front of /api/* (routes/auth.ts and AuthGate.tsx
+// are still here, unused, if a login gate is ever needed again).
 app.use('/api/auth', authRouter);
-app.use('/api', requireAuth);
 app.use('/api/trips', tripsRouter);
 app.use('/api/resales', resalesRouter);
 app.use('/api/expenses', expensesRouter);
