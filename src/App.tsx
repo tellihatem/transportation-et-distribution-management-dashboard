@@ -183,6 +183,40 @@ export default function App() {
     driverName: "",
   });
 
+  // Selling price per unit for the resale form. Form-only helper: the record
+  // stores the TOTAL (clientSellingPrice), but the operator normally thinks in
+  // price-per-unit, and the total must follow when the quantity changes.
+  const [resaleUnitPrice, setResaleUnitPrice] = useState<number>(0);
+
+  // Keep the two in sync from either direction.
+  const setResaleSellingByUnit = (unitPrice: number) => {
+    setResaleUnitPrice(unitPrice);
+    setResaleForm(p => ({
+      ...p,
+      clientSellingPrice: Math.round(unitPrice * (Number(p.totalTonnage) || 0)),
+    }));
+  };
+
+  const setResaleQuantity = (qty: number) => {
+    setResaleForm(p => ({
+      ...p,
+      totalTonnage: qty,
+      // Only re-derive the total when a unit price is actually in play,
+      // so a manually typed total is never silently overwritten.
+      clientSellingPrice: resaleUnitPrice > 0
+        ? Math.round(resaleUnitPrice * qty)
+        : p.clientSellingPrice,
+    }));
+  };
+
+  const setResaleSellingTotal = (total: number) => {
+    setResaleForm(p => {
+      const qty = Number(p.totalTonnage) || 0;
+      setResaleUnitPrice(qty > 0 ? total / qty : 0);
+      return { ...p, clientSellingPrice: total };
+    });
+  };
+
   // State for Expense (Tab 3 Form)
   const [expenseForm, setExpenseForm] = useState<Partial<OtherExpense>>({
     id: "",
@@ -303,16 +337,25 @@ export default function App() {
   }, [filteredResaleTxs]);
 
   // Tab 3 Expenses
+  // Only approved (Paid) expenses count as real overhead. Items still marked
+  // "قيد الدراسة والمطالبة" (Pending) are not approved yet, so they must not
+  // reduce profit or appear in the spending breakdown — they are reported
+  // separately as pendingTotal.
   const tab3Stats = useMemo(() => {
     let totalOverhead = 0;
+    let pendingTotal = 0;
     let categoryBreakdown: Record<string, number> = {};
 
     filteredExpenses.forEach(exp => {
+      if (exp.status === "Pending") {
+        pendingTotal += exp.amount;
+        return;
+      }
       totalOverhead += exp.amount;
       categoryBreakdown[exp.category] = (categoryBreakdown[exp.category] || 0) + exp.amount;
     });
 
-    return { totalOverhead, categoryBreakdown };
+    return { totalOverhead, pendingTotal, categoryBreakdown };
   }, [filteredExpenses]);
 
   // Global Net Cashflow: Net Cashflow = (Tab 1 Company Profit + Tab 2 Total True Profit) - Tab 3 Total Expenses
@@ -371,6 +414,7 @@ export default function App() {
         explicitProfit: 8000,
         driverName: "",
       });
+      setResaleUnitPrice(180000 / 40);
     } else {
       const id = await fetchNextExpenseId().catch(() => localNextId("EXP-", expenses.map(e => e.id)));
       setExpenseForm({
@@ -395,6 +439,8 @@ export default function App() {
       setTripForm({ ...record });
     } else if (targetType === "resale") {
       setResaleForm({ ...record });
+      const qty = Number(record.totalTonnage) || 0;
+      setResaleUnitPrice(qty > 0 ? (Number(record.clientSellingPrice) || 0) / qty : 0);
     } else {
       setExpenseForm({ ...record });
     }
@@ -676,16 +722,18 @@ export default function App() {
                 : selectedReceipt.data.clientSellingPrice;
               const facturePaid = selectedReceipt.data.clientPaid || 0;
               const factureRemaining = factureTotal - facturePaid;
-              // Transport price = truck rental (الكراء) + the driver's wage
-              const driverWage = selectedReceipt.type === "transport"
-                ? selectedReceipt.data.driverCut
-                : selectedReceipt.data.driverCost;
-              const transportPrice = selectedReceipt.data.truckCost + driverWage;
+              // The service price shown to the client is the full amount they owe.
+              // It must NOT be the internal (كراء + أجرة السائق) subtotal: printing
+              // that next to the total would let the client subtract the two and
+              // derive the company's margin (أرباح المؤسسة الصافية).
+              const servicePrice = factureTotal;
               return (
                 <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-700">سعر النقل (الكراء + أجرة السائق)</span>
-                    <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} دج</span>
+                    <span className="text-slate-700">
+                      {selectedReceipt.type === "transport" ? "سعر النقل" : "سعر البضاعة والنقل"}
+                    </span>
+                    <span className="font-mono font-bold text-slate-900">{servicePrice.toLocaleString()} دج</span>
                   </div>
                   <div className="flex justify-between items-center border-t border-slate-300 pt-2">
                     <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
@@ -781,11 +829,11 @@ export default function App() {
                   onChange={handleImportFile}
                   className="hidden"
                 />
-
+{/* 
                 <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
                   <span>متصل بقاعدة البيانات المباشرة</span>
-                </div>
+                </div> */}
               </div>
 
             </div>
@@ -1504,15 +1552,15 @@ export default function App() {
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">إجمالي المصاريف والمحروقات</span>
                     <span className="text-3xl font-black font-mono text-rose-500 block mt-1">{tab3Stats.totalOverhead.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-400">تدفق مالي هالك للرواتب وعقود الوقود</span>
+                    <span className="text-[10px] text-slate-400">المصاريف المدفوعة فقط (لا تشمل المعلّقة)</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">الأعباء المعلّقة</span>
                     <span className="text-2xl font-black font-mono text-amber-500 block">
-                      {filteredExpenses.filter(e => e.status === "Pending").reduce((sum, e) => sum + e.amount, 0).toLocaleString()} دج
+                      {tab3Stats.pendingTotal.toLocaleString()} دج
                     </span>
-                    <span className="text-[10px] text-slate-500">أعباء مستحقة لكن غير مدفوعة حالياً</span>
+                    <span className="text-[10px] text-slate-500">قيد الدراسة ولم تُحتسب ضمن المصاريف</span>
                   </div>
                 </div>
 
@@ -1949,7 +1997,7 @@ export default function App() {
                             type="number"
                             required
                             value={resaleForm.totalTonnage}
-                            onChange={e => setResaleForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
+                            onChange={e => setResaleQuantity(parseFloat(e.target.value) || 0)}
                             className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                           />
                           <input
@@ -1965,16 +2013,33 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-slate-400 mb-1">السعر البيعي الإجمالي للزبون</label>
-                      <input
-                        type="number"
-                        required
-                        placeholder="ثمن المادة + ثمن خدمات الشحن ككل"
-                        value={resaleForm.clientSellingPrice}
-                        onChange={e => setResaleForm(p => ({ ...p, clientSellingPrice: parseInt(e.target.value) || 0 }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-mono font-bold"
-                      />
+                    <div className="text-[10px] text-slate-400 -mt-1 flex justify-between bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
+                      <span>تكلفة شراء البضاعة (الكمية × سعر الوحدة):</span>
+                      <strong className="text-rose-300 font-mono">{tempSourcingCost.toLocaleString()} دج</strong>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">سعر البيع للزبون (للوحدة دج)</label>
+                        <input
+                          type="number"
+                          value={resaleUnitPrice ? Math.round(resaleUnitPrice) : ""}
+                          placeholder="سعر بيع الوحدة الواحدة"
+                          onChange={e => setResaleSellingByUnit(parseFloat(e.target.value) || 0)}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">السعر البيعي الإجمالي للزبون</label>
+                        <input
+                          type="number"
+                          required
+                          placeholder="ثمن المادة + ثمن خدمات الشحن ككل"
+                          value={resaleForm.clientSellingPrice}
+                          onChange={e => setResaleSellingTotal(parseInt(e.target.value) || 0)}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-mono font-bold"
+                        />
+                      </div>
                     </div>
 
                     {/* TRUCK DRIVER EXPLICIT STRUCTURE */}

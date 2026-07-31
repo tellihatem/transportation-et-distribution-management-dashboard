@@ -70,12 +70,15 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
   let pendingAmount = 0;
   const categoryBreakdown: Record<string, number> = {};
 
+  // Pending expenses are not approved yet, so they are reported separately and
+  // excluded from totalOverhead / categoryBreakdown (which feed profit figures).
   rows.forEach((row: any) => {
-    totalOverhead += row.amount;
-    categoryBreakdown[row.category] = (categoryBreakdown[row.category] || 0) + row.amount;
     if (row.status === 'Pending') {
       pendingAmount += row.amount;
+      return;
     }
+    totalOverhead += row.amount;
+    categoryBreakdown[row.category] = (categoryBreakdown[row.category] || 0) + row.amount;
   });
 
   res.json({ success: true, data: { totalOverhead, categoryBreakdown, pendingAmount } });

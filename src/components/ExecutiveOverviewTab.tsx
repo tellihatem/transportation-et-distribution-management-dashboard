@@ -96,7 +96,11 @@ export function ExecutiveOverviewTab({
     });
 
     // 3. Operational Expenses (Tab 3) - Fixed Burdens (Fuel, Maintenance, Admin, etc.)
-    const totalOperationalBurdens = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    // Only approved (Paid) expenses count. Pending items ("قيد الدراسة والمطالبة")
+    // are not approved yet and must not reduce reported profit.
+    const totalOperationalBurdens = expenses
+      .filter(e => e.status !== 'Pending')
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
 
     // 4. Client Ledgers (Cash Collected & Receivables)
     const clientInvoicedTotal = clientSummaries.reduce((sum, c) => sum + c.totalInvoiced, 0);
@@ -317,9 +321,9 @@ export function ExecutiveOverviewTab({
             </div>
           </div>
 
-          <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-xl text-[11px] text-emerald-300/90 leading-relaxed">
+          {/* <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-xl text-[11px] text-emerald-300/90 leading-relaxed">
             💡 <strong>نظام متكامل بدون تكرار:</strong> جميع التبويبات مرتبطة تلقائياً بالدفاتر المالية لتفادي الازدواجية في الدفع وضمان دقة التقارير.
-          </div>
+          </div> */}
         </div>
 
       </div>
