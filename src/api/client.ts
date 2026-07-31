@@ -3,7 +3,7 @@
  * All data operations go through this module.
  */
 
-import type { ClientTransportTrip, MaterialResaleTx, OtherExpense } from '../types';
+import type { ClientTransportTrip, ClientTransportTripInput, MaterialResaleTx, MaterialResaleTxInput, OtherExpense } from '../types';
 
 const BASE_URL = '/api';
 
@@ -63,14 +63,14 @@ export async function fetchNextTripId(): Promise<string> {
   return data.nextId;
 }
 
-export async function createTrip(trip: ClientTransportTrip): Promise<ClientTransportTrip> {
+export async function createTrip(trip: ClientTransportTripInput): Promise<ClientTransportTrip> {
   return request<ClientTransportTrip>('/trips', {
     method: 'POST',
     body: JSON.stringify(trip),
   });
 }
 
-export async function updateTrip(id: string, trip: Partial<ClientTransportTrip>): Promise<ClientTransportTrip> {
+export async function updateTrip(id: string, trip: Partial<ClientTransportTripInput>): Promise<ClientTransportTrip> {
   return request<ClientTransportTrip>(`/trips/${id}`, {
     method: 'PUT',
     body: JSON.stringify(trip),
@@ -108,14 +108,14 @@ export async function fetchNextResaleId(): Promise<string> {
   return data.nextId;
 }
 
-export async function createResale(resale: MaterialResaleTx): Promise<MaterialResaleTx> {
+export async function createResale(resale: MaterialResaleTxInput): Promise<MaterialResaleTx> {
   return request<MaterialResaleTx>('/resales', {
     method: 'POST',
     body: JSON.stringify(resale),
   });
 }
 
-export async function updateResale(id: string, resale: Partial<MaterialResaleTx>): Promise<MaterialResaleTx> {
+export async function updateResale(id: string, resale: Partial<MaterialResaleTxInput>): Promise<MaterialResaleTx> {
   return request<MaterialResaleTx>(`/resales/${id}`, {
     method: 'PUT',
     body: JSON.stringify(resale),
@@ -231,6 +231,98 @@ export async function importBackup(backup: any): Promise<{ imported: Record<stri
 }
 
 // ──────────────────────────────────────────
+// Client Payments & Ledgers
+// ──────────────────────────────────────────
+
+export async function fetchClientPayments(params?: {
+  clientName?: string;
+  dateStart?: string;
+  dateEnd?: string;
+}): Promise<import('../types').ClientPayment[]> {
+  const query = buildQueryString(params);
+  return request<import('../types').ClientPayment[]>(`/client-payments${query}`);
+}
+
+export async function fetchClientSummaries(): Promise<import('../types').ClientSummary[]> {
+  return request<import('../types').ClientSummary[]>('/client-payments/summary');
+}
+
+export async function fetchClientStatement(clientName: string): Promise<import('../types').ClientStatement> {
+  return request<import('../types').ClientStatement>(`/client-payments/statement/${encodeURIComponent(clientName)}`);
+}
+
+export async function fetchNextClientPaymentId(): Promise<string> {
+  const data = await request<{ nextId: string }>('/client-payments/next-id');
+  return data.nextId;
+}
+
+export async function createClientPayment(payload: {
+  id?: string;
+  date: string;
+  clientName: string;
+  amount: number;
+  paymentMethod?: string;
+  notes?: string;
+  allocationMode: 'auto' | 'manual' | 'none';
+  allocations?: import('../types').ClientPaymentAllocation[];
+}): Promise<import('../types').ClientPayment> {
+  return request<import('../types').ClientPayment>('/client-payments', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteClientPayment(id: string): Promise<void> {
+  return request(`/client-payments/${id}`, { method: 'DELETE' });
+}
+
+// ──────────────────────────────────────────
+// Driver Payments & Ledgers
+// ──────────────────────────────────────────
+
+export async function fetchDriverPayments(params?: {
+  driverName?: string;
+  dateStart?: string;
+  dateEnd?: string;
+}): Promise<import('../types').DriverPayment[]> {
+  const query = buildQueryString(params);
+  return request<import('../types').DriverPayment[]>(`/driver-payments${query}`);
+}
+
+export async function fetchDriverSummaries(): Promise<import('../types').DriverSummary[]> {
+  return request<import('../types').DriverSummary[]>('/driver-payments/summary');
+}
+
+export async function fetchDriverStatement(driverName: string): Promise<import('../types').DriverStatement> {
+  return request<import('../types').DriverStatement>(`/driver-payments/statement/${encodeURIComponent(driverName)}`);
+}
+
+export async function fetchNextDriverPaymentId(): Promise<string> {
+  const data = await request<{ nextId: string }>('/driver-payments/next-id');
+  return data.nextId;
+}
+
+export async function createDriverPayment(payload: {
+  id?: string;
+  date: string;
+  driverName: string;
+  amount: number;
+  paymentType?: string;
+  notes?: string;
+  allocationMode: 'auto' | 'manual' | 'none';
+  allocations?: import('../types').DriverPaymentAllocation[];
+}): Promise<import('../types').DriverPayment> {
+  return request<import('../types').DriverPayment>('/driver-payments', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteDriverPayment(id: string): Promise<void> {
+  return request(`/driver-payments/${id}`, { method: 'DELETE' });
+}
+
+// ──────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────
 
@@ -240,3 +332,4 @@ function buildQueryString(params?: Record<string, string | undefined>): string {
   if (entries.length === 0) return '';
   return '?' + new URLSearchParams(entries as [string, string][]).toString();
 }
+

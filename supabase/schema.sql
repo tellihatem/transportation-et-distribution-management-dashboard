@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS client_trips (
     destination TEXT NOT NULL,
     material_type TEXT NOT NULL,
     total_tonnage NUMERIC NOT NULL,
+    quantity_unit TEXT DEFAULT 'طن',
     truck_cost INTEGER NOT NULL,
     driver_cut INTEGER NOT NULL,
     company_profit INTEGER NOT NULL,
@@ -28,8 +29,11 @@ CREATE TABLE IF NOT EXISTS material_resales (
     date TEXT NOT NULL,
     end_client TEXT NOT NULL,
     destination TEXT NOT NULL DEFAULT '',
+    material_type TEXT DEFAULT '',
+    origin_factory TEXT DEFAULT '',
     factory_purchase_price INTEGER NOT NULL,
     total_tonnage NUMERIC NOT NULL,
+    quantity_unit TEXT DEFAULT 'طن',
     client_selling_price INTEGER NOT NULL,
     truck_cost INTEGER NOT NULL,
     driver_cost INTEGER NOT NULL,
@@ -79,3 +83,9 @@ CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
 -- ALTER TABLE material_resales ADD COLUMN driver_name TEXT DEFAULT '';
 -- ALTER TABLE material_resales ADD COLUMN client_paid INTEGER DEFAULT 0;
 -- ALTER TABLE material_resales ADD COLUMN driver_paid INTEGER DEFAULT 0;
+
+-- If this schema was applied before cargo details / flexible units existed:
+-- ALTER TABLE client_trips ADD COLUMN quantity_unit TEXT DEFAULT 'طن';
+-- ALTER TABLE material_resales ADD COLUMN material_type TEXT DEFAULT '';
+-- ALTER TABLE material_resales ADD COLUMN origin_factory TEXT DEFAULT '';
+-- ALTER TABLE material_resales ADD COLUMN quantity_unit TEXT DEFAULT 'طن';

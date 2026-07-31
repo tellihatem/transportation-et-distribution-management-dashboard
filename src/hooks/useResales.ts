@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import type { MaterialResaleTx, TabFilters } from '../types';
+import type { MaterialResaleTx, MaterialResaleTxInput, TabFilters } from '../types';
 import { fetchResales, createResale, updateResale, deleteResale } from '../api/client';
 
 export function useResales(filters: TabFilters) {
@@ -32,13 +32,13 @@ export function useResales(filters: TabFilters) {
     load();
   }, [load]);
 
-  const addResale = useCallback(async (resale: MaterialResaleTx) => {
+  const addResale = useCallback(async (resale: MaterialResaleTxInput) => {
     const created = await createResale(resale);
     setResales(prev => [created, ...prev]);
     return created;
   }, []);
 
-  const editResale = useCallback(async (id: string, resale: Partial<MaterialResaleTx>) => {
+  const editResale = useCallback(async (id: string, resale: Partial<MaterialResaleTxInput>) => {
     const updated = await updateResale(id, resale);
     setResales(prev => prev.map(r => r.id === id ? updated : r));
     return updated;

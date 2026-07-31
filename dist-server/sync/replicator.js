@@ -23,6 +23,7 @@ const TABLE_COLUMN_MAP = {
         id: 'id', date: 'date', client_name: 'client_name',
         origin_factory: 'origin_factory', destination: 'destination',
         material_type: 'material_type', total_tonnage: 'total_tonnage',
+        quantity_unit: 'quantity_unit',
         truck_cost: 'truck_cost', driver_cut: 'driver_cut',
         company_profit: 'company_profit', driver_name: 'driver_name',
         client_paid: 'client_paid', driver_paid: 'driver_paid',
@@ -30,7 +31,9 @@ const TABLE_COLUMN_MAP = {
     },
     material_resales: {
         id: 'id', date: 'date', end_client: 'end_client', destination: 'destination',
+        material_type: 'material_type', origin_factory: 'origin_factory',
         factory_purchase_price: 'factory_purchase_price', total_tonnage: 'total_tonnage',
+        quantity_unit: 'quantity_unit',
         client_selling_price: 'client_selling_price', truck_cost: 'truck_cost',
         driver_cost: 'driver_cost', explicit_profit: 'explicit_profit',
         driver_name: 'driver_name', client_paid: 'client_paid', driver_paid: 'driver_paid',

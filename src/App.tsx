@@ -51,11 +51,16 @@ import {
 } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
 
-import { ClientTransportTrip, MaterialResaleTx, OtherExpense, TabFilters } from "./types";
+import { ClientTransportTrip, ClientTransportTripInput, MaterialResaleTx, MaterialResaleTxInput, OtherExpense, TabFilters } from "./types";
 import { TRANSLATE_EXPENSE_CATEGORY, EXPENSE_CATEGORIES } from "./data";
 import { useTrips } from "./hooks/useTrips";
 import { useResales } from "./hooks/useResales";
 import { useExpenses } from "./hooks/useExpenses";
+import { useClientPayments } from "./hooks/useClientPayments";
+import { useDriverPayments } from "./hooks/useDriverPayments";
+import { ClientAccountsTab } from "./components/ClientAccountsTab";
+import { DriverAccountsTab } from "./components/DriverAccountsTab";
+import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { downloadBackup, importBackup, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
 import logoUrl from "../assets/canvas.png";
 
@@ -68,6 +73,10 @@ const ALGERIAN_MONTHS = [
 function formatAlgerianDate(d: Date): string {
   return `${d.getDate()} ${ALGERIAN_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
+
+// Suggested units for the quantity field. The input is free-text, so anything
+// else can be typed in — these are just the common ones.
+const QUANTITY_UNITS = ["طن", "قنطار", "كيلوغرام", "متر مكعب", "وحدة", "كيس", "لتر", "رحلة"];
 
 // Colored paid/remaining badge used in the trips and resales tables
 function PaymentBadge({ paid, total }: { paid: number; total: number }) {
@@ -111,13 +120,21 @@ export default function App() {
   };
 
   // --- Backend-backed data (Express + SQLite, via /api) ---
-  const { trips: clientTrips, error: tripsError, addTrip, editTrip, removeTrip } = useTrips(filters);
-  const { resales: resaleTxs, error: resalesError, addResale, editResale, removeResale } = useResales(filters);
+  const { trips: clientTrips, error: tripsError, addTrip, editTrip, removeTrip, reload: reloadTrips } = useTrips(filters);
+  const { resales: resaleTxs, error: resalesError, addResale, editResale, removeResale, reload: reloadResales } = useResales(filters);
   const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
+  const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, reload: reloadClientPayments } = useClientPayments(filters);
+  const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, reload: reloadDriverPayments } = useDriverPayments(filters);
+
+  const refreshAllData = () => {
+    reloadTrips();
+    reloadResales();
+    reloadClientPayments();
+    reloadDriverPayments();
+  };
 
   // --- Active Tab State ---
-  // "transport" = Client Transport, "resale" = Material Resale, "expenses" = Other Expenses
-  const [activeTab, setActiveTab] = useState<"transport" | "resale" | "expenses">("transport");
+  const [activeTab, setActiveTab] = useState<"overview" | "transport" | "resale" | "clients" | "drivers" | "expenses">("overview");
 
   // --- Modals State ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -133,7 +150,7 @@ export default function App() {
 
   // --- Dynamic Form States for adding/editing records ---
   // State for Trip (Tab 1 Form)
-  const [tripForm, setTripForm] = useState<Partial<ClientTransportTrip>>({
+  const [tripForm, setTripForm] = useState<Partial<ClientTransportTripInput>>({
     id: "",
     date: new Date().toISOString().split("T")[0],
     clientName: "",
@@ -141,29 +158,29 @@ export default function App() {
     destination: "",
     materialType: "",
     totalTonnage: 30,
+    quantityUnit: "طن",
     truckCost: 15000,
     driverCut: 5000,
     companyProfit: 5000,
     driverName: "",
-    clientPaid: 0,
-    driverPaid: 0
   });
 
   // State for Resale (Tab 2 Form)
-  const [resaleForm, setResaleForm] = useState<Partial<MaterialResaleTx>>({
+  const [resaleForm, setResaleForm] = useState<Partial<MaterialResaleTxInput>>({
     id: "",
     date: new Date().toISOString().split("T")[0],
     endClient: "",
     destination: "",
+    materialType: "",
+    originFactory: "",
     factoryPurchasePrice: 1500,
     totalTonnage: 40,
+    quantityUnit: "طن",
     clientSellingPrice: 150000,
     truckCost: 18000,
     driverCost: 5000,
     explicitProfit: 8000,
     driverName: "",
-    clientPaid: 0,
-    driverPaid: 0
   });
 
   // State for Expense (Tab 3 Form)
@@ -210,6 +227,8 @@ export default function App() {
         tx.endClient.toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         (tx.destination || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         (tx.driverName || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
+        (tx.materialType || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
+        (tx.originFactory || "").toLowerCase().includes(filters.searchQuery.toLowerCase()) ||
         tx.id.toLowerCase().includes(filters.searchQuery.toLowerCase());
 
       const matchDate = (!filters.dateStart || tx.date >= filters.dateStart) &&
@@ -310,10 +329,15 @@ export default function App() {
     return `${prefix}${max + 1}`;
   };
 
-  const handleOpenAdd = async () => {
+  const [modalRecordType, setModalRecordType] = useState<"transport" | "resale" | "expenses">("transport");
+
+  const handleOpenAdd = async (type?: "transport" | "resale" | "expenses") => {
     setModalType("add");
     setEditRecordId(null);
-    if (activeTab === "transport") {
+    const targetType = type || (activeTab === "resale" ? "resale" : activeTab === "expenses" ? "expenses" : "transport");
+    setModalRecordType(targetType);
+
+    if (targetType === "transport") {
       const id = await fetchNextTripId().catch(() => localNextId("TR-", clientTrips.map(t => t.id)));
       setTripForm({
         id,
@@ -323,29 +347,29 @@ export default function App() {
         destination: "",
         materialType: "",
         totalTonnage: 32,
+        quantityUnit: "طن",
         truckCost: 15000,
         driverCut: 5000,
         companyProfit: 6000,
         driverName: "",
-        clientPaid: 0,
-        driverPaid: 0
       });
-    } else if (activeTab === "resale") {
+    } else if (targetType === "resale") {
       const id = await fetchNextResaleId().catch(() => localNextId("RS-", resaleTxs.map(t => t.id)));
       setResaleForm({
         id,
         date: new Date().toISOString().split("T")[0],
         endClient: "",
         destination: "",
+        materialType: "",
+        originFactory: "",
         factoryPurchasePrice: 1500,
         totalTonnage: 40,
+        quantityUnit: "طن",
         clientSellingPrice: 180000,
         truckCost: 18000,
         driverCost: 5000,
         explicitProfit: 8000,
         driverName: "",
-        clientPaid: 0,
-        driverPaid: 0
       });
     } else {
       const id = await fetchNextExpenseId().catch(() => localNextId("EXP-", expenses.map(e => e.id)));
@@ -361,12 +385,15 @@ export default function App() {
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (record: any) => {
+  const handleOpenEdit = (record: any, type?: "transport" | "resale" | "expenses") => {
     setModalType("edit");
     setEditRecordId(record.id);
-    if (activeTab === "transport") {
+    const targetType = type || (record.endClient ? "resale" : record.category ? "expenses" : "transport");
+    setModalRecordType(targetType);
+
+    if (targetType === "transport") {
       setTripForm({ ...record });
-    } else if (activeTab === "resale") {
+    } else if (targetType === "resale") {
       setResaleForm({ ...record });
     } else {
       setExpenseForm({ ...record });
@@ -374,16 +401,18 @@ export default function App() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, type?: "transport" | "resale" | "expenses") => {
     if (!confirm("هل أنت متأكد من رغبتك في حذف هذا السجل بشكل نهائي؟")) return;
+    const targetType = type || (activeTab === "resale" ? "resale" : activeTab === "expenses" ? "expenses" : "transport");
     try {
-      if (activeTab === "transport") {
+      if (targetType === "transport") {
         await removeTrip(id);
-      } else if (activeTab === "resale") {
+      } else if (targetType === "resale") {
         await removeResale(id);
       } else {
         await removeExpense(id);
       }
+      refreshAllData();
     } catch (err: any) {
       alert(`تعذر حذف السجل: ${err.message}`);
     }
@@ -392,8 +421,8 @@ export default function App() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (activeTab === "transport") {
-        const data: ClientTransportTrip = {
+      if (modalRecordType === "transport") {
+        const data: ClientTransportTripInput = {
           id: tripForm.id || localNextId("TR-", clientTrips.map(t => t.id)),
           date: tripForm.date || "",
           clientName: tripForm.clientName || "",
@@ -401,12 +430,11 @@ export default function App() {
           destination: tripForm.destination || "",
           materialType: tripForm.materialType || "",
           totalTonnage: Number(tripForm.totalTonnage) || 0,
+          quantityUnit: tripForm.quantityUnit || "طن",
           truckCost: Number(tripForm.truckCost) || 0,
           driverCut: Number(tripForm.driverCut) || 0,
           companyProfit: Number(tripForm.companyProfit) || 0,
-          driverName: tripForm.driverName || "",
-          clientPaid: Number(tripForm.clientPaid) || 0,
-          driverPaid: Number(tripForm.driverPaid) || 0
+          driverName: tripForm.driverName || ""
         };
 
         if (modalType === "add") {
@@ -414,21 +442,22 @@ export default function App() {
         } else {
           await editTrip(editRecordId!, data);
         }
-      } else if (activeTab === "resale") {
-        const data: MaterialResaleTx = {
+      } else if (modalRecordType === "resale") {
+        const data: MaterialResaleTxInput = {
           id: resaleForm.id || localNextId("RS-", resaleTxs.map(t => t.id)),
           date: resaleForm.date || "",
           endClient: resaleForm.endClient || "",
           destination: resaleForm.destination || "",
+          materialType: resaleForm.materialType || "",
+          originFactory: resaleForm.originFactory || "",
           factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
           totalTonnage: Number(resaleForm.totalTonnage) || 0,
+          quantityUnit: resaleForm.quantityUnit || "طن",
           clientSellingPrice: Number(resaleForm.clientSellingPrice) || 0,
           truckCost: Number(resaleForm.truckCost) || 0,
           driverCost: Number(resaleForm.driverCost) || 0,
           explicitProfit: Number(resaleForm.explicitProfit) || 0,
-          driverName: resaleForm.driverName || "",
-          clientPaid: Number(resaleForm.clientPaid) || 0,
-          driverPaid: Number(resaleForm.driverPaid) || 0
+          driverName: resaleForm.driverName || ""
         };
 
         if (modalType === "add") {
@@ -453,6 +482,7 @@ export default function App() {
         }
       }
       setIsModalOpen(false);
+      refreshAllData();
     } catch (err: any) {
       alert(`تعذر حفظ السجل: ${err.message}`);
     }
@@ -616,30 +646,21 @@ export default function App() {
                   </strong>
                 </div>
                 <div>
-                  <span className="text-slate-600">الإجمالي بالوزن:</span>{" "}
-                  <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong>
+                  <span className="text-slate-600">الكمية الإجمالية:</span>{" "}
+                  <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || "طن"}</strong>
                 </div>
-                {selectedReceipt.type === "transport" ? (
-                  <>
-                    <div>
-                      <span className="text-slate-600">المادة المشحونة:</span>{" "}
-                      <strong className="text-slate-900">{selectedReceipt.data.materialType}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-600">منشأ الشحنة:</span>{" "}
-                      <strong className="text-slate-900">{selectedReceipt.data.originFactory}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-600">الوجهة المستهدفة:</span>{" "}
-                      <strong className="text-slate-900">{selectedReceipt.data.destination}</strong>
-                    </div>
-                  </>
-                ) : (
-                  <div>
-                    <span className="text-slate-600">الوجهة المستهدفة:</span>{" "}
-                    <strong className="text-slate-900">{selectedReceipt.data.destination}</strong>
-                  </div>
-                )}
+                <div>
+                  <span className="text-slate-600">المادة المشحونة:</span>{" "}
+                  <strong className="text-slate-900">{selectedReceipt.data.materialType || "—"}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-600">منشأ الشحنة:</span>{" "}
+                  <strong className="text-slate-900">{selectedReceipt.data.originFactory || "—"}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-600">الوجهة المستهدفة:</span>{" "}
+                  <strong className="text-slate-900">{selectedReceipt.data.destination || "—"}</strong>
+                </div>
                 {selectedReceipt.data.driverName && (
                   <div>
                     <span className="text-slate-600">السائق:</span>{" "}
@@ -655,9 +676,18 @@ export default function App() {
                 : selectedReceipt.data.clientSellingPrice;
               const facturePaid = selectedReceipt.data.clientPaid || 0;
               const factureRemaining = factureTotal - facturePaid;
+              // Transport price = truck rental (الكراء) + the driver's wage
+              const driverWage = selectedReceipt.type === "transport"
+                ? selectedReceipt.data.driverCut
+                : selectedReceipt.data.driverCost;
+              const transportPrice = selectedReceipt.data.truckCost + driverWage;
               return (
                 <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
-                  <div className="flex justify-between items-center">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-700">سعر النقل (الكراء + أجرة السائق)</span>
+                    <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} دج</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-slate-300 pt-2">
                     <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
                     <span className="text-2xl font-mono font-bold text-slate-950">
                       {factureTotal.toLocaleString()} دج
@@ -886,39 +916,72 @@ export default function App() {
             </div>
 
             {/* TAB CONTROLLERS */}
-            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 w-full md:w-auto">
+            <div className="flex flex-wrap bg-slate-950 p-1 rounded-xl border border-slate-800 w-full md:w-auto gap-1">
+
+              <button
+                onClick={() => { setActiveTab("overview"); resetFilters(); }}
+                className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "overview"
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/15"
+                  : "text-slate-400 hover:text-slate-200"
+                  }`}
+              >
+                <Compass className="h-3.5 w-3.5" />
+                <span>لوحة القيادة الموحدة</span>
+              </button>
 
               <button
                 onClick={() => { setActiveTab("transport"); resetFilters(); }}
-                className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "transport"
+                className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "transport"
                   ? "bg-blue-600 text-white shadow-md shadow-blue-600/15"
                   : "text-slate-400 hover:text-slate-200"
                   }`}
               >
                 <Truck className="h-3.5 w-3.5" />
-                <span>شحن لصالح العملاء</span>
+                <span>رحلات نقل العملاء</span>
               </button>
 
               <button
                 onClick={() => { setActiveTab("resale"); resetFilters(); }}
-                className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "resale"
+                className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "resale"
                   ? "bg-blue-600 text-white shadow-md shadow-blue-600/15"
                   : "text-slate-400 hover:text-slate-200"
                   }`}
               >
                 <Briefcase className="h-3.5 w-3.5" />
-                <span>شراء ونقل ومستتر</span>
+                <span>بيع وتوصيل المواد</span>
+              </button>
+
+              <button
+                onClick={() => { setActiveTab("clients"); resetFilters(); }}
+                className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "clients"
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/15"
+                  : "text-slate-400 hover:text-slate-200"
+                  }`}
+              >
+                <CreditCard className="h-3.5 w-3.5 text-emerald-400" />
+                <span>حسابات العملاء</span>
+              </button>
+
+              <button
+                onClick={() => { setActiveTab("drivers"); resetFilters(); }}
+                className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "drivers"
+                  ? "bg-cyan-600 text-white shadow-md shadow-cyan-600/15"
+                  : "text-slate-400 hover:text-slate-200"
+                  }`}
+              >
+                <Truck className="h-3.5 w-3.5 text-cyan-400" />
+                <span>تصفية السائقين</span>
               </button>
 
               <button
                 onClick={() => { setActiveTab("expenses"); resetFilters(); }}
-                className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "expenses"
+                className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "expenses"
                   ? "bg-blue-600 text-white shadow-md shadow-blue-600/15"
                   : "text-slate-400 hover:text-slate-200"
                   }`}
               >
-                <CreditCard className="h-3.5 w-3.5" />
-                <span>المصاريف الأخرى الأسطول</span>
+                <TrendingDown className="h-3.5 w-3.5 text-rose-400" />
+                <span>مصاريف الأسطول الأُخرى</span>
               </button>
 
             </div>
@@ -929,6 +992,61 @@ export default function App() {
         {/* CONTAINER CONTENT ACCORDING TO TABS */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
           <AnimatePresence mode="wait">
+
+            {/* TAB OVERVIEW: EXECUTIVE DASHBOARD */}
+            {activeTab === "overview" && (
+              <motion.div
+                key="tab-overview"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+              >
+                <ExecutiveOverviewTab
+                  trips={clientTrips}
+                  resales={resaleTxs}
+                  expenses={expenses}
+                  clientSummaries={clientSummaries}
+                  driverSummaries={driverSummaries}
+                  onNavigateTab={tab => setActiveTab(tab)}
+                />
+              </motion.div>
+            )}
+
+            {/* TAB CLIENTS: CLIENT ACCOUNTS & RECEIVABLES */}
+            {activeTab === "clients" && (
+              <motion.div
+                key="tab-clients"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+              >
+                <ClientAccountsTab
+                  summaries={clientSummaries}
+                  loading={false}
+                  filters={filters}
+                  onRecordPayment={recordClientPayment}
+                  onRefreshTrips={refreshAllData}
+                />
+              </motion.div>
+            )}
+
+            {/* TAB DRIVERS: DRIVER ACCOUNTS & SETTLEMENTS */}
+            {activeTab === "drivers" && (
+              <motion.div
+                key="tab-drivers"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+              >
+                <DriverAccountsTab
+                  summaries={driverSummaries}
+                  loading={false}
+                  filters={filters}
+                  onRecordPayment={recordDriverPayment}
+                  onRefreshTrips={refreshAllData}
+                />
+              </motion.div>
+            )}
 
             {/* TAB 1: CLIENT TRANSPORT (شحن لصالح العملاء) */}
             {activeTab === "transport" && (
@@ -1043,7 +1161,7 @@ export default function App() {
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-bold text-white">تفاصيل الشحنات والمطالبات</h4>
                         <button
-                          onClick={handleOpenAdd}
+                          onClick={() => handleOpenAdd("transport")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
                         >
                           <Plus className="h-3.5 w-3.5" />
@@ -1059,7 +1177,7 @@ export default function App() {
                               <th className="p-3">التاريخ</th>
                               <th className="p-3">العميل والمادة</th>
                               <th className="p-3">تفاصيل النقل</th>
-                              <th className="p-3">الحمولة بالطن</th>
+                              <th className="p-3">الكمية</th>
                               <th className="p-3">التعريفة الإجمالية</th>
                               <th className="p-3">مدفوعات العميل</th>
                               <th className="p-3">السائق ومدفوعاته</th>
@@ -1092,7 +1210,7 @@ export default function App() {
                                         <span className="text-slate-400">{trip.destination}</span>
                                       </div>
                                     </td>
-                                    <td className="p-3 font-mono text-slate-100">{trip.totalTonnage} طن</td>
+                                    <td className="p-3 font-mono text-slate-100">{trip.totalTonnage} {trip.quantityUnit || "طن"}</td>
                                     <td className="p-3 font-mono font-bold text-emerald-400">{totalCost.toLocaleString()} دج</td>
                                     <td className="p-3">
                                       <div className="font-mono text-slate-300">{(trip.clientPaid || 0).toLocaleString()} دج</div>
@@ -1257,7 +1375,7 @@ export default function App() {
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-bold text-white">إعادة بيع وتوريد السلع</h4>
                         <button
-                          onClick={handleOpenAdd}
+                          onClick={() => handleOpenAdd("resale")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
                         >
                           <Plus className="h-3.5 w-3.5" />
@@ -1298,7 +1416,7 @@ export default function App() {
                                     <td className="p-3 text-slate-300 font-mono">{tx.date}</td>
                                     <td className="p-3">
                                       <div className="font-bold text-slate-100">{tx.endClient}</div>
-                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{tx.totalTonnage} طن × {tx.factoryPurchasePrice} دج</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{tx.totalTonnage} {tx.quantityUnit || "طن"} × {tx.factoryPurchasePrice} دج</div>
                                       {tx.destination && (
                                         <div className="text-[10px] text-slate-500 mt-0.5">إلى: {tx.destination}</div>
                                       )}
@@ -1451,7 +1569,7 @@ export default function App() {
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-bold text-white">جدول المصاريف والصيانات والأجور</h4>
                         <button
-                          onClick={handleOpenAdd}
+                          onClick={() => handleOpenAdd("expenses")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
                         >
                           <Plus className="h-3.5 w-3.5" />
@@ -1550,7 +1668,7 @@ export default function App() {
                     {modalType === "add" ? "إضافة قيد جديد" : "تحديث وتعديل القيد"}
                   </span>
                   <span className="text-xs font-normal text-slate-400">
-                    ({activeTab === "transport" ? "شحن عميل" : activeTab === "resale" ? "تجارة وتوريد" : "أعباء ومصاريف"})
+                    ({modalRecordType === "transport" ? "شحن عميل" : modalRecordType === "resale" ? "تجارة وتوريد" : "أعباء ومصاريف"})
                   </span>
                 </h3>
                 <button
@@ -1561,10 +1679,16 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Suggested quantity units — the field stays free-text so any
+                  other unit can be typed in directly. */}
+              <datalist id="quantity-units">
+                {QUANTITY_UNITS.map(u => <option key={u} value={u} />)}
+              </datalist>
+
               {/* DYNAMIC FORMS ACCORDING TO TABS */}
               <form onSubmit={handleSubmit} className="space-y-4">
 
-                {activeTab === "transport" && (
+                {modalRecordType === "transport" && (
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -1652,15 +1776,26 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">مكعبات الحمولة الكلية (طن)</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          required
-                          value={tripForm.totalTonnage}
-                          onChange={e => setTripForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
-                        />
+                        <label className="block text-slate-400 mb-1">الكمية الإجمالية</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            step="0.1"
+                            required
+                            value={tripForm.totalTonnage}
+                            onChange={e => setTripForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
+                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          />
+                          <input
+                            type="text"
+                            list="quantity-units"
+                            required
+                            placeholder="الوحدة"
+                            value={tripForm.quantityUnit}
+                            onChange={e => setTripForm(p => ({ ...p, quantityUnit: e.target.value }))}
+                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1705,40 +1840,11 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Payment tracking: client + driver amounts paid so far */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-amber-400 font-bold block">متابعة المدفوعات</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-slate-500 mb-1">المدفوع من العميل</label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={tripForm.clientPaid}
-                            onChange={e => setTripForm(p => ({ ...p, clientPaid: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-500 mb-1">المدفوع للسائق</label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={tripForm.driverPaid}
-                            onChange={e => setTripForm(p => ({ ...p, driverPaid: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
-                          />
-                        </div>
-                      </div>
-                      <div className="pt-1 text-[10px] flex justify-between text-slate-400">
-                        <span>المتبقي على العميل: <strong className={(computedFormTotalTransportFee - (Number(tripForm.clientPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{(computedFormTotalTransportFee - (Number(tripForm.clientPaid) || 0)).toLocaleString()} دج</strong></span>
-                        <span>المتبقي للسائق: <strong className={((Number(tripForm.driverCut) || 0) - (Number(tripForm.driverPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{((Number(tripForm.driverCut) || 0) - (Number(tripForm.driverPaid) || 0)).toLocaleString()} دج</strong></span>
-                      </div>
-                    </div>
+                    {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
                   </div>
                 )}
 
-                {activeTab === "resale" && (
+                {modalRecordType === "resale" && (
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -1802,7 +1908,32 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">سعر الشراء الكلي من الشركة الأصلية (للطن دج)</label>
+                        <label className="block text-slate-400 mb-1">نوع المادة المباعة</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="حصى أو إسمنت"
+                          value={resaleForm.materialType}
+                          onChange={e => setResaleForm(p => ({ ...p, materialType: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">المصنع المصدر للسلعة</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="مصنع الأسمنت"
+                          value={resaleForm.originFactory}
+                          onChange={e => setResaleForm(p => ({ ...p, originFactory: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">سعر الشراء من الشركة الأصلية (للوحدة دج)</label>
                         <input
                           type="number"
                           required
@@ -1812,14 +1943,25 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">الحجم بالكل (أطنان)</label>
-                        <input
-                          type="number"
-                          required
-                          value={resaleForm.totalTonnage}
-                          onChange={e => setResaleForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
-                        />
+                        <label className="block text-slate-400 mb-1">الكمية الإجمالية</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            required
+                            value={resaleForm.totalTonnage}
+                            onChange={e => setResaleForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
+                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          />
+                          <input
+                            type="text"
+                            list="quantity-units"
+                            required
+                            placeholder="الوحدة"
+                            value={resaleForm.quantityUnit}
+                            onChange={e => setResaleForm(p => ({ ...p, quantityUnit: e.target.value }))}
+                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1876,40 +2018,11 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Payment tracking: client + driver amounts paid so far */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-amber-400 font-bold block">متابعة المدفوعات</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-slate-500 mb-1">المدفوع من العميل</label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={resaleForm.clientPaid}
-                            onChange={e => setResaleForm(p => ({ ...p, clientPaid: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-500 mb-1">المدفوع للسائق</label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={resaleForm.driverPaid}
-                            onChange={e => setResaleForm(p => ({ ...p, driverPaid: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
-                          />
-                        </div>
-                      </div>
-                      <div className="pt-1 text-[10px] flex justify-between text-slate-400">
-                        <span>المتبقي على العميل: <strong className={((Number(resaleForm.clientSellingPrice) || 0) - (Number(resaleForm.clientPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{((Number(resaleForm.clientSellingPrice) || 0) - (Number(resaleForm.clientPaid) || 0)).toLocaleString()} دج</strong></span>
-                        <span>المتبقي للسائق: <strong className={((Number(resaleForm.driverCost) || 0) - (Number(resaleForm.driverPaid) || 0)) <= 0 ? "text-emerald-400" : "text-amber-400"}>{((Number(resaleForm.driverCost) || 0) - (Number(resaleForm.driverPaid) || 0)).toLocaleString()} دج</strong></span>
-                      </div>
-                    </div>
+                    {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
                   </div>
                 )}
 
-                {activeTab === "expenses" && (
+                {modalRecordType === "expenses" && (
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -2065,7 +2178,7 @@ export default function App() {
                       <div><span className="text-slate-500">المادة المشحونة:</span> <strong className="text-slate-900">{selectedReceipt.data.materialType}</strong></div>
                       <div><span className="text-slate-500">منشأ الشحنة:</span> <strong className="text-slate-900">{selectedReceipt.data.originFactory}</strong></div>
                       <div><span className="text-slate-500">الوجهة المستهدفة:</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
-                      <div><span className="text-slate-500">الإجمالي بالوزن:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong></div>
+                      <div><span className="text-slate-500">الكمية الإجمالية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || "طن"}</strong></div>
                     </div>
 
                     <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-2">
@@ -2111,9 +2224,11 @@ export default function App() {
                   <div className="space-y-4 text-xs">
                     <div className="grid grid-cols-2 gap-y-2">
                       <div><span className="text-slate-500">الزبون النهائي:</span> <strong className="text-slate-900">{selectedReceipt.data.endClient}</strong></div>
+                      <div><span className="text-slate-500">المادة المباعة:</span> <strong className="text-slate-900">{selectedReceipt.data.materialType || "—"}</strong></div>
+                      <div><span className="text-slate-500">منشأ الشحنة:</span> <strong className="text-slate-900">{selectedReceipt.data.originFactory || "—"}</strong></div>
                       <div><span className="text-slate-500">الوجهة المستهدفة:</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
-                      <div><span className="text-slate-500">الحمولة الكلية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} طن</strong></div>
-                      <div><span className="text-slate-500">سعر شراء المصنع (للطن):</span> <strong className="text-slate-900">{selectedReceipt.data.factoryPurchasePrice.toLocaleString()} دج / طن</strong></div>
+                      <div><span className="text-slate-500">الكمية الإجمالية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || "طن"}</strong></div>
+                      <div><span className="text-slate-500">سعر شراء المصنع:</span> <strong className="text-slate-900">{selectedReceipt.data.factoryPurchasePrice.toLocaleString()} دج / {selectedReceipt.data.quantityUnit || "طن"}</strong></div>
                       <div><span className="text-slate-500">كلفة السلع الكلية:</span> <strong className="text-slate-900">{(selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage).toLocaleString()} دج</strong></div>
                     </div>
 

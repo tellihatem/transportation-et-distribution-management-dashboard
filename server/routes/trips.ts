@@ -112,7 +112,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
  * POST /api/trips — Create new trip
  */
 router.post('/', asyncHandler(async (req: Request, res: Response) => {
-  const { id, date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit, driverName, clientPaid, driverPaid } = req.body;
+  const { id, date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, companyProfit, driverName } = req.body;
 
   if (!id || !date || !clientName) {
     throw createApiError('Missing required fields: id, date, clientName', 400, 'VALIDATION_ERROR');
@@ -125,9 +125,9 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   }
 
   db.prepare(`
-    INSERT INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, truck_cost, driver_cut, company_profit, driver_name, client_paid, driver_paid)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, truckCost || 0, driverCut || 0, companyProfit || 0, driverName || '', clientPaid || 0, driverPaid || 0);
+    INSERT INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, quantity_unit, truck_cost, driver_cut, company_profit, driver_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, quantityUnit || 'طن', truckCost || 0, driverCut || 0, companyProfit || 0, driverName || '');
 
   const created = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(id);
 
@@ -144,16 +144,16 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
   if (!existing) throw createApiError('Trip not found', 404, 'NOT_FOUND');
 
-  const { date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit, driverName, clientPaid, driverPaid } = req.body;
+  const { date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, companyProfit, driverName } = req.body;
 
   db.prepare(`
     UPDATE client_trips SET
       date = ?, client_name = ?, origin_factory = ?, destination = ?,
-      material_type = ?, total_tonnage = ?, truck_cost = ?, driver_cut = ?,
-      company_profit = ?, driver_name = ?, client_paid = ?, driver_paid = ?,
+      material_type = ?, total_tonnage = ?, quantity_unit = ?, truck_cost = ?, driver_cut = ?,
+      company_profit = ?, driver_name = ?,
       updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, clientName, originFactory, destination, materialType, totalTonnage, truckCost, driverCut, companyProfit, driverName || '', clientPaid || 0, driverPaid || 0, req.params.id);
+  `).run(date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit || 'طن', truckCost, driverCut, companyProfit, driverName || '', req.params.id);
 
   const updated = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
   queueSync('client_trips', req.params.id, 'upsert', updated);
@@ -186,6 +186,7 @@ function mapRowToTrip(row: any) {
     destination: row.destination,
     materialType: row.material_type,
     totalTonnage: row.total_tonnage,
+    quantityUnit: row.quantity_unit ?? 'طن',
     truckCost: row.truck_cost,
     driverCut: row.driver_cut,
     companyProfit: row.company_profit,

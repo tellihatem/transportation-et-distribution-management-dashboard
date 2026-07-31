@@ -26,6 +26,8 @@ import resalesRouter from './routes/resales';
 import expensesRouter from './routes/expenses';
 import syncRouter from './routes/sync';
 import backupRouter from './routes/backup';
+import clientPaymentsRouter from './routes/client-payments';
+import driverPaymentsRouter from './routes/driver-payments';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -129,6 +131,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/trips', tripsRouter);
 app.use('/api/resales', resalesRouter);
 app.use('/api/expenses', expensesRouter);
+app.use('/api/client-payments', clientPaymentsRouter);
+app.use('/api/driver-payments', driverPaymentsRouter);
 app.use('/api/sync', syncRouter);
 app.use('/api/backup', backupRouter);
 
