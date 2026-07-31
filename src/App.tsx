@@ -296,6 +296,8 @@ export default function App() {
     let totalTons = 0;
     let clientOutstanding = 0; // Still owed by clients
     let driverOutstanding = 0; // Still owed to drivers
+    let clientCollected = 0;   // Cash actually received (from the client ledger)
+    let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
 
     filteredClientTrips.forEach(trip => {
       const tripFee = trip.truckCost + trip.driverCut + trip.companyProfit;
@@ -305,9 +307,11 @@ export default function App() {
       totalTons += trip.totalTonnage;
       clientOutstanding += Math.max(0, tripFee - (trip.clientPaid || 0));
       driverOutstanding += Math.max(0, trip.driverCut - (trip.driverPaid || 0));
+      clientCollected += (trip.clientPaid || 0);
+      driverSettled += (trip.driverPaid || 0);
     });
 
-    return { grossRevenue, driverPayout, netMargin, totalTons, clientOutstanding, driverOutstanding };
+    return { grossRevenue, driverPayout, netMargin, totalTons, clientOutstanding, driverOutstanding, clientCollected, driverSettled };
   }, [filteredClientTrips]);
 
   // Tab 2 Profits
@@ -318,6 +322,8 @@ export default function App() {
     let totalTons = 0;
     let clientOutstanding = 0; // Still owed by clients
     let driverOutstanding = 0; // Still owed to drivers
+    let clientCollected = 0;   // Cash actually received (from the client ledger)
+    let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
 
     filteredResaleTxs.forEach(tx => {
       const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
@@ -331,9 +337,11 @@ export default function App() {
       totalTons += tx.totalTonnage;
       clientOutstanding += Math.max(0, tx.clientSellingPrice - (tx.clientPaid || 0));
       driverOutstanding += Math.max(0, tx.driverCost - (tx.driverPaid || 0));
+      clientCollected += (tx.clientPaid || 0);
+      driverSettled += (tx.driverPaid || 0);
     });
 
-    return { tradingTurnover, capitalOutlay, totalTrueProfit, totalTons, clientOutstanding, driverOutstanding };
+    return { tradingTurnover, capitalOutlay, totalTrueProfit, totalTons, clientOutstanding, driverOutstanding, clientCollected, driverSettled };
   }, [filteredResaleTxs]);
 
   // Tab 3 Expenses
@@ -358,8 +366,23 @@ export default function App() {
     return { totalOverhead, pendingTotal, categoryBreakdown };
   }, [filteredExpenses]);
 
-  // Global Net Cashflow: Net Cashflow = (Tab 1 Company Profit + Tab 2 Total True Profit) - Tab 3 Total Expenses
-  const masterNetCashflow = (tab1Stats.netMargin + tab2Stats.totalTrueProfit) - tab3Stats.totalOverhead;
+  // Company net PROFIT for the selected period (accrual): earned margin on
+  // transport + resale, minus approved operating expenses. This is what the
+  // business made on paper — it is NOT cash in hand, because a trip counts as
+  // soon as it is invoiced whether or not the client has paid.
+  const masterNetProfit = (tab1Stats.netMargin + tab2Stats.totalTrueProfit) - tab3Stats.totalOverhead;
+
+  // Actual cash position for the same filtered rows, taken from the payment
+  // ledgers (client_paid / driver_paid are kept in sync by the allocations).
+  // Derived from the same filtered records as the profit above so the two
+  // figures always describe the same period — the /summary endpoints are
+  // all-time and would not line up here.
+  const periodCash = {
+    collected: tab1Stats.clientCollected + tab2Stats.clientCollected,
+    receivable: tab1Stats.clientOutstanding + tab2Stats.clientOutstanding,
+    driverSettled: tab1Stats.driverSettled + tab2Stats.driverSettled,
+    driverPayable: tab1Stats.driverOutstanding + tab2Stats.driverOutstanding,
+  };
 
   // --- Add / Edit Records Logic ---
   // IDs are sequential (TR-1, TR-2, ...), computed server-side from the full
@@ -854,52 +877,75 @@ export default function App() {
               <div className="lg:col-span-8 space-y-4">
                 <div className="inline-flex items-center gap-2 bg-slate-800/80 border border-slate-700 px-3 py-1 rounded-lg text-xs">
                   <Tag className="h-3.5 w-3.5 text-cyan-400" />
-                  <span className="font-bold text-slate-300">المركزي الشامل للميزانية والتدفقات النقدية</span>
+                  <span className="font-bold text-slate-300">الملخص المالي الشامل للفترة المحددة</span>
                 </div>
 
                 <h2 className="text-xl sm:text-2xl font-extrabold text-white font-display">
-                  معادلة صافي التدفق المالي للشركة
+                  معادلة صافي ربح الشركة
                 </h2>
 
                 {/* Mathematical visual schema */}
                 <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-300">
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">مجموع أرباح الشحن (تبويب 1)</span>
+                    <span className="text-[10px] text-slate-500">أرباح رحلات نقل العملاء</span>
                     <span className="text-emerald-400 font-bold font-mono">+{tab1Stats.netMargin.toLocaleString()} دج</span>
                   </div>
                   <span className="text-slate-600 font-bold text-lg">+</span>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">أرباح تجارة المواد المشروعة (تبويب 2)</span>
+                    <span className="text-[10px] text-slate-500">أرباح بيع وتوصيل المواد</span>
                     <span className="text-emerald-400 font-bold font-mono">+{tab2Stats.totalTrueProfit.toLocaleString()} دج</span>
                   </div>
                   <span className="text-slate-600 font-bold text-lg">-</span>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">المصاريف والأعباء التشغيلية (تبويب 3)</span>
+                    <span className="text-[10px] text-slate-500">مصاريف الأسطول المدفوعة</span>
                     <span className="text-rose-400 font-bold font-mono">-{tab3Stats.totalOverhead.toLocaleString()} دج</span>
                   </div>
                   <span className="text-slate-500 font-bold text-lg">=</span>
                   <div className="bg-slate-800/40 px-3 py-1 rounded border border-slate-700 flex flex-col">
-                    <span className="text-[10px] text-cyan-400 font-bold">صافي النقد المحقق للشركة</span>
-                    <span className={`font-mono font-bold text-base ${masterNetCashflow >= 0 ? 'text-cyan-300' : 'text-rose-400'}`}>
-                      {masterNetCashflow.toLocaleString()} دج
+                    <span className="text-[10px] text-cyan-400 font-bold">صافي ربح الشركة</span>
+                    <span className={`font-mono font-bold text-base ${masterNetProfit >= 0 ? 'text-cyan-300' : 'text-rose-400'}`}>
+                      {masterNetProfit.toLocaleString()} دج
                     </span>
+                  </div>
+                </div>
+
+                {/* Actual cash position — profit above is accrued, this is what
+                    has really been collected/paid according to the ledgers. */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+                    <span className="text-[10px] text-slate-500 block">المحصل من العملاء</span>
+                    <span className="text-emerald-400 font-bold font-mono text-sm">{periodCash.collected.toLocaleString()} دج</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+                    <span className="text-[10px] text-slate-500 block">متبقي على العملاء</span>
+                    <span className="text-amber-400 font-bold font-mono text-sm">{periodCash.receivable.toLocaleString()} دج</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+                    <span className="text-[10px] text-slate-500 block">المدفوع للسائقين</span>
+                    <span className="text-blue-400 font-bold font-mono text-sm">{periodCash.driverSettled.toLocaleString()} دج</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+                    <span className="text-[10px] text-slate-500 block">متبقي للسائقين</span>
+                    <span className="text-rose-400 font-bold font-mono text-sm">{periodCash.driverPayable.toLocaleString()} دج</span>
                   </div>
                 </div>
               </div>
 
               {/* High impact visualization counter */}
               <div className="lg:col-span-4 bg-[#1e293b]/50 border border-slate-800 rounded-2xl p-5 text-center flex flex-col justify-center items-center">
-                <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">إجمالي التدفق المالي الصافي الحالي</p>
+                <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">صافي ربح الشركة خلال الفترة</p>
 
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className={`text-4xl font-black font-mono tracking-tight ${masterNetCashflow >= 0 ? 'text-emerald-400 drop-shadow-[0_0_12px_rgba(34,197,94,0.2)]' : 'text-rose-500'}`}>
-                    {masterNetCashflow.toLocaleString()}
+                  <span className={`text-4xl font-black font-mono tracking-tight ${masterNetProfit >= 0 ? 'text-emerald-400 drop-shadow-[0_0_12px_rgba(34,197,94,0.2)]' : 'text-rose-500'}`}>
+                    {masterNetProfit.toLocaleString()}
                   </span>
                   <span className="text-sm text-slate-400">دج</span>
                 </div>
 
+                <p className="mt-1 text-[10px] text-slate-500">ربح محتسب على الفواتير، وليس نقداً في الخزينة</p>
+
                 <div className="mt-3 flex items-center justify-center gap-1.5 py-1 px-3.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300">
-                  {masterNetCashflow >= 0 ? (
+                  {masterNetProfit >= 0 ? (
                     <>
                       <TrendingUp className="h-4 w-4 text-emerald-400" />
                       <span>الموازنة في حالة كفاءة وربحية إيجابية</span>
@@ -911,6 +957,13 @@ export default function App() {
                     </>
                   )}
                 </div>
+
+                {periodCash.receivable > 0 && (
+                  <div className="mt-2 flex items-center justify-center gap-1.5 py-1 px-3 rounded-full bg-amber-950/40 border border-amber-900/60 text-[10px] text-amber-300">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    <span>{periodCash.receivable.toLocaleString()} دج لم تُحصّل بعد من العملاء</span>
+                  </div>
+                )}
               </div>
 
             </div>
@@ -1124,11 +1177,11 @@ export default function App() {
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">مستحقات السائقين</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي أجور السائقين</span>
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
                     <span className="text-2xl font-black font-mono text-blue-400 block mt-1">{tab1Stats.driverPayout.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">حفّز السداد المباشر لقنوات السائقين</span>
+                    <span className="text-[10px] text-slate-500">الأجور المستحقة عن الرحلات (مدفوعة وغير مدفوعة)</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
