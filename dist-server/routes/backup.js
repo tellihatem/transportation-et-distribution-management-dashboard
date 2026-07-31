@@ -13,17 +13,35 @@ const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
 const router = (0, express_1.Router)();
-const BACKUP_VERSION = 1;
-const TABLES = ['client_trips', 'material_resales', 'expenses'];
+const BACKUP_VERSION = 2;
+// Order matters on import: parents before children, because the allocation
+// tables carry FOREIGN KEY references to their payment tables (and foreign_keys
+// is ON). Deletion walks this list in reverse for the same reason.
+const TABLES = [
+    'client_trips',
+    'material_resales',
+    'expenses',
+    'client_payments',
+    'client_payment_allocations',
+    'driver_payments',
+    'driver_payment_allocations',
+];
 const COLUMNS_BY_TABLE = {
-    client_trips: ['id', 'date', 'client_name', 'origin_factory', 'destination', 'material_type', 'total_tonnage', 'truck_cost', 'driver_cut', 'company_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
-    material_resales: ['id', 'date', 'end_client', 'destination', 'factory_purchase_price', 'total_tonnage', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
+    client_trips: ['id', 'date', 'client_name', 'origin_factory', 'destination', 'material_type', 'total_tonnage', 'quantity_unit', 'truck_cost', 'driver_cut', 'company_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
+    material_resales: ['id', 'date', 'end_client', 'destination', 'material_type', 'origin_factory', 'factory_purchase_price', 'total_tonnage', 'quantity_unit', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
     expenses: ['id', 'date', 'category', 'truck_plate', 'amount', 'status', 'created_at', 'updated_at'],
+    client_payments: ['id', 'date', 'client_name', 'amount', 'payment_method', 'notes', 'created_at', 'updated_at'],
+    client_payment_allocations: ['payment_id', 'trip_type', 'trip_id', 'amount', 'created_at'],
+    driver_payments: ['id', 'date', 'driver_name', 'amount', 'payment_type', 'notes', 'created_at', 'updated_at'],
+    driver_payment_allocations: ['payment_id', 'trip_type', 'trip_id', 'amount', 'created_at'],
 };
 // Defaults for columns that may be absent in backups from older app versions
 const COLUMN_FALLBACKS = {
     destination: '',
     driver_name: '',
+    material_type: '',
+    origin_factory: '',
+    quantity_unit: 'طن',
     client_paid: 0,
     driver_paid: 0,
 };
@@ -64,25 +82,31 @@ router.post('/import', (0, error_handler_1.asyncHandler)(async (req, res) => {
     }
     const counts = {};
     const importTransaction = database_1.default.transaction(() => {
+        // Clear children before parents so FK constraints are never violated.
+        for (const table of [...TABLES].reverse()) {
+            database_1.default.prepare(`DELETE FROM ${table}`).run();
+        }
+        // Insert parents before children (TABLES is ordered accordingly).
         for (const table of TABLES) {
             const rows = tables[table] || [];
             const cols = COLUMNS_BY_TABLE[table];
             const placeholders = cols.map(() => '?').join(', ');
             const insert = database_1.default.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`);
-            database_1.default.prepare(`DELETE FROM ${table}`).run();
             for (const row of rows) {
                 // Backups from older app versions may lack columns added later
-                // (destination, driver_name, client_paid, driver_paid). Inserting an
-                // explicit NULL bypasses SQLite column defaults and can violate
-                // NOT NULL, so coalesce missing values to safe defaults instead.
+                // (destination, driver_name, client_paid, driver_paid, quantity_unit).
+                // Inserting an explicit NULL bypasses SQLite column defaults and can
+                // violate NOT NULL, so coalesce missing values to safe defaults instead.
                 insert.run(...cols.map(c => row[c] ?? COLUMN_FALLBACKS[c] ?? null));
             }
             counts[table] = rows.length;
         }
     });
     importTransaction();
-    // Queue every restored record for Supabase sync (no-op if cloud sync isn't configured)
-    for (const table of TABLES) {
+    // Queue every restored record for Supabase sync (no-op if cloud sync isn't
+    // configured). Only the tables that have a Supabase mirror and a text `id`
+    // are replicated; the allocation tables use autoincrement ids and are local.
+    for (const table of ['client_trips', 'material_resales', 'expenses']) {
         const rows = database_1.default.prepare(`SELECT * FROM ${table}`).all();
         for (const row of rows) {
             (0, replicator_1.queueSync)(table, row.id, 'upsert', row);

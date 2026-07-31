@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import type { ClientTransportTrip, TabFilters } from '../types';
+import type { ClientTransportTrip, ClientTransportTripInput, TabFilters } from '../types';
 import { fetchTrips, createTrip, updateTrip, deleteTrip } from '../api/client';
 
 export function useTrips(filters: TabFilters) {
@@ -32,13 +32,13 @@ export function useTrips(filters: TabFilters) {
     load();
   }, [load]);
 
-  const addTrip = useCallback(async (trip: ClientTransportTrip) => {
+  const addTrip = useCallback(async (trip: ClientTransportTripInput) => {
     const created = await createTrip(trip);
     setTrips(prev => [created, ...prev]);
     return created;
   }, []);
 
-  const editTrip = useCallback(async (id: string, trip: Partial<ClientTransportTrip>) => {
+  const editTrip = useCallback(async (id: string, trip: Partial<ClientTransportTripInput>) => {
     const updated = await updateTrip(id, trip);
     setTrips(prev => prev.map(t => t.id === id ? updated : t));
     return updated;
