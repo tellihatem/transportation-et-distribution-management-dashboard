@@ -222,7 +222,6 @@ export const TRANSLATE_EXPENSE_CATEGORY: Record<string, string> = {
   "Fuel": "وقود ومحروقات",
   "Spare Parts": "قطع غيار وميكانيك",
   "Fines": "غرامات ومخالفات الطرق",
-  "Salaries": "رواتب ومكافآت",
   "Admin": "مصاريف إدارية ومكتبية"
 };
 
@@ -230,6 +229,5 @@ export const EXPENSE_CATEGORIES = [
   { value: "Fuel", label: "وقود ومحروقات" },
   { value: "Spare Parts", label: "قطع غيار وميكانيك" },
   { value: "Fines", label: "غرامات ومخالفات الطرق" },
-  { value: "Salaries", label: "رواتب ومكافآت" },
   { value: "Admin", label: "مصاريف إدارية ومكتبية" }
 ];
