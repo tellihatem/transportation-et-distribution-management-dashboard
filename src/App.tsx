@@ -374,16 +374,18 @@ export default function App() {
   // soon as it is invoiced whether or not the client has paid.
   const masterNetProfit = (tab1Stats.netMargin + tab2Stats.totalTrueProfit) - tab3Stats.totalOverhead;
 
-  // Actual cash position for the same filtered rows, taken from the payment
-  // ledgers (client_paid / driver_paid are kept in sync by the allocations).
-  // Derived from the same filtered records as the profit above so the two
-  // figures always describe the same period — the /summary endpoints are
-  // all-time and would not line up here.
+  // Actual cash position, taken from the client/driver ledgers (the same
+  // all-time summaries the Client/Driver Accounts tabs use). This is
+  // deliberately NOT scoped to the selected date range: a debt or credit
+  // balance doesn't reset when the operator changes the month filter, and
+  // scoping it by the trip's own date previously meant a payment recorded
+  // against an older invoice silently vanished from this banner whenever the
+  // filter moved to the current month.
   const periodCash = {
-    collected: tab1Stats.clientCollected + tab2Stats.clientCollected,
-    receivable: tab1Stats.clientOutstanding + tab2Stats.clientOutstanding,
-    driverSettled: tab1Stats.driverSettled + tab2Stats.driverSettled,
-    driverPayable: tab1Stats.driverOutstanding + tab2Stats.driverOutstanding,
+    collected: clientSummaries.reduce((sum, c) => sum + c.totalPaymentsReceived, 0),
+    receivable: clientSummaries.reduce((sum, c) => sum + c.outstandingReceivable, 0),
+    driverSettled: driverSummaries.reduce((sum, d) => sum + d.totalPaymentsGiven, 0),
+    driverPayable: driverSummaries.reduce((sum, d) => sum + d.outstandingPayable, 0),
   };
 
   // --- Add / Edit Records Logic ---
@@ -1075,7 +1077,7 @@ export default function App() {
               <button
                 onClick={resetFilters}
                 className="px-3 py-1.5 text-xs bg-slate-800 border border-slate-700/80 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                title="إعادة تعيين إلى جوان 2026"
+                title={`إعادة تعيين إلى ${ALGERIAN_MONTHS[new Date().getMonth()]} ${new Date().getFullYear()}`}
               >
                 مسح التصفية
               </button>
