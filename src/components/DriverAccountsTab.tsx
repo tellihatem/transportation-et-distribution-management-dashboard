@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   CreditCard,
   Search,
@@ -601,8 +602,12 @@ export function DriverAccountsTab({
         </div>
       )}
 
-      {/* HIDDEN PRINTABLE DRIVER STATEMENT — rendered only on window.print() via @media print CSS */}
-      {statementData && isStatementModalOpen && (
+      {/* HIDDEN PRINTABLE DRIVER STATEMENT — rendered only on window.print() via @media print CSS.
+          Portaled to document.body: this component is mounted inside the app's
+          "no-print" wrapper, and a `display:none` ancestor hides descendants
+          regardless of their own display rules, so the container must escape
+          that subtree to be printable at all. */}
+      {statementData && isStatementModalOpen && createPortal(
         <div className="hidden print-statement-container">
           <div style={{ maxWidth: '700px', margin: '0 auto', fontFamily: 'sans-serif' }}>
             <div style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '12px', marginBottom: '16px' }}>
@@ -699,7 +704,8 @@ export function DriverAccountsTab({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>
