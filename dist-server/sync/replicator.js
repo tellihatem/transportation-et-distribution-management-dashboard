@@ -36,7 +36,8 @@ const TABLE_COLUMN_MAP = {
         quantity_unit: 'quantity_unit',
         client_selling_price: 'client_selling_price', truck_cost: 'truck_cost',
         driver_cost: 'driver_cost', explicit_profit: 'explicit_profit',
-        driver_name: 'driver_name', client_paid: 'client_paid', driver_paid: 'driver_paid',
+        driver_name: 'driver_name', trip_count: 'trip_count', trip_unit_cost: 'trip_unit_cost',
+        client_paid: 'client_paid', driver_paid: 'driver_paid',
         created_at: 'created_at', updated_at: 'updated_at',
     },
     expenses: {
