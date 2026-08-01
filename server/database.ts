@@ -73,58 +73,11 @@ export function runMigrations(): void {
 }
 
 /**
- * Seed the database with initial data if tables are empty
+ * No-op in production — the client's database starts empty.
+ * Seed data was used during development only.
  */
 export function seedIfEmpty(): void {
-  const tripCount = (db.prepare('SELECT COUNT(*) as count FROM client_trips').get() as any).count;
-  
-  if (tripCount > 0) {
-    console.log('[DB] Database already has data, skipping seed.');
-    return;
-  }
-
-  console.log('[DB] Seeding database with initial data...');
-
-  const insertTrip = db.prepare(`
-    INSERT OR IGNORE INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, quantity_unit, truck_cost, driver_cut, company_profit, driver_name, client_paid, driver_paid)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertResale = db.prepare(`
-    INSERT OR IGNORE INTO material_resales (id, date, end_client, destination, material_type, origin_factory, factory_purchase_price, total_tonnage, quantity_unit, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, client_paid, driver_paid)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertExpense = db.prepare(`
-    INSERT OR IGNORE INTO expenses (id, date, category, truck_plate, amount, status)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  const seedTransaction = db.transaction(() => {
-    // Client Transport Trips
-    insertTrip.run('TR-202', '2026-06-01', 'مجموعة حداد للأشغال العامة', 'مصنع الإسمنت سيدي بلعباس', 'ورشة الطريق السريع تلمسان', 'إسمنت رمادي 42.5', 32.5, 'طن', 15000, 5000, 6000, 'بلال رحماني', 0, 0);
-    insertTrip.run('TR-203', '2026-06-03', 'شركة بوعمامة للبناء', 'محجرة الغرب تلموني', 'موقع 1500 مسكن عدل', 'حصى غسيل 0/15', 40.0, 'طن', 12000, 4000, 4500, 'عمر بوزيد', 0, 0);
-    insertTrip.run('TR-204', '2026-06-05', 'مؤسسة بلحول للري', 'مركب الحديد و الصلب وهران', 'قناة جر المياه سفيزف', 'أنابيب حديد قطر 500', 15.0, 'طن', 20000, 6000, 8000, 'بلال رحماني', 0, 0);
-    insertTrip.run('TR-205', '2026-06-07', 'الحاج بلخير للمقاولات', 'محجرة الرمال تيموشنت', 'منطقة النشاطات عين تموشنت', 'رمل بناء ناعم', 28.0, 'طن', 8000, 3500, 3500, 'حسين مقراني', 0, 0);
-    insertTrip.run('TR-206', '2026-06-09', 'مؤسسة الأشغال الكبرى العيد', 'مصنع الأجر السانية', 'حي السلام بلعباس', 'أجر أحمر 8 عيون', 30.0, 'طن', 14000, 4500, 5500, 'عمر بوزيد', 0, 0);
-
-    // Material Resale Transactions
-    insertResale.run('RS-801', '2026-06-02', 'المقاول الأخضر لتهيئة الحدائق', 'حديقة المسيلة الحضرية', 'تربة فلاحية', 'محجرة الغرب تلموني', 1200, 45.0, 'طن', 115000, 16000, 5000, 7000, 'بلال رحماني', 0, 0);
-    insertResale.run('RS-802', '2026-06-04', 'شركة جيل المستقبل العقارية', 'مشروع سكني حي الأمل', 'إسمنت رمادي 42.5', 'مصنع الإسمنت سيدي بلعباس', 2500, 50.0, 'طن', 220000, 22000, 7000, 11000, 'حسين مقراني', 0, 0);
-    insertResale.run('RS-803', '2026-06-06', 'مؤسسة الأشغال المائية التل', 'سد وادي التل', 'حصى غسيل 0/15', 'محجرة الرمال تيموشنت', 1800, 35.0, 'طن', 145000, 15000, 4500, 7500, 'عمر بوزيد', 0, 0);
-    insertResale.run('RS-804', '2026-06-08', 'تعاونية البناء بلعباس الأنيق', 'حي التعاونية بلعباس', 'أجر أحمر 8 عيون', 'مصنع الأجر السانية', 1100, 60.0, 'طن', 160000, 18000, 6000, 8000, 'بلال رحماني', 0, 0);
-
-    // Other Expenses
-    insertExpense.run('EXP-101', '2026-06-02', 'Fuel', '01345-116-22', 18000, 'Paid');
-    insertExpense.run('EXP-102', '2026-06-04', 'Spare Parts', '44129-113-22', 45000, 'Paid');
-    insertExpense.run('EXP-103', '2026-06-06', 'Fines', '01345-116-22', 6000, 'Pending');
-    insertExpense.run('EXP-104', '2026-06-07', 'Salaries', 'جميع الشاحنات', 85000, 'Paid');
-    insertExpense.run('EXP-105', '2026-06-08', 'Admin', 'مكتب الإدارة', 12000, 'Paid');
-    insertExpense.run('EXP-106', '2026-06-09', 'Fuel', '09689-115-22', 22000, 'Paid');
-  });
-
-  seedTransaction();
-  console.log('[DB] Seed data inserted successfully.');
+  // Production databases start empty — no test data inserted.
 }
 
 export default db;

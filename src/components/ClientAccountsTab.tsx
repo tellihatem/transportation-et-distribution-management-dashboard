@@ -456,7 +456,7 @@ export function ClientAccountsTab({
 
       {/* STATEMENT OF ACCOUNT MODAL */}
       {isStatementModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-800/80">
               <div className="flex items-center gap-2 text-emerald-400 font-bold text-lg">
@@ -600,6 +600,108 @@ export function ClientAccountsTab({
           </div>
         </div>
       )}
+
+      {/* HIDDEN PRINTABLE CLIENT STATEMENT — rendered only on window.print() via @media print CSS */}
+      {statementData && isStatementModalOpen && (
+        <div className="hidden print-statement-container">
+          <div style={{ maxWidth: '700px', margin: '0 auto', fontFamily: 'sans-serif' }}>
+            <div style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px' }}>نقل وتوزيع البضائع لعلاوي عبد المالك</h1>
+              <p style={{ fontSize: '11px', margin: '0 0 4px', color: '#666' }}>كشف حساب تفصيلي</p>
+              <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0' }}>العميل: {statementData.clientName}</p>
+              <p style={{ fontSize: '10px', margin: '4px 0 0', color: '#888' }}>تاريخ الطباعة: {new Date().toLocaleDateString('ar-DZ')}</p>
+            </div>
+
+            <table style={{ width: '100%', marginBottom: '16px', fontSize: '11px' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>إجمالي الفواتير</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.totalInvoiced.toLocaleString()} دج</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>إجمالي المسددات</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.totalPaymentsReceived.toLocaleString()} دج</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>الرصيد المتبقي (دين)</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.outstandingReceivable.toLocaleString()} دج</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>الرصيد المسبق (عربون)</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.unallocatedCredit.toLocaleString()} دج</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>سجل الرحلات والمعاملات ({statementData.itemizedTrips.length})</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>التاريخ</th>
+                  <th>النوع</th>
+                  <th>الرقم</th>
+                  <th>المادة / الوجهة</th>
+                  <th>الحمولة</th>
+                  <th>السعر الكلي</th>
+                  <th>المسدد</th>
+                  <th>المتبقي</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statementData.itemizedTrips.map((item, idx) => (
+                  <tr key={idx}>
+                    <td>{item.date}</td>
+                    <td>{item.type === 'transport' ? 'نقل' : 'بيع مواد'}</td>
+                    <td>{item.id}</td>
+                    <td>{item.materialType} ← {item.destination}</td>
+                    <td>{item.totalTonnage} {item.quantityUnit}</td>
+                    <td>{item.totalPrice.toLocaleString()} دج</td>
+                    <td>{item.clientPaid.toLocaleString()} دج</td>
+                    <td style={{ fontWeight: item.remaining > 0 ? 'bold' : 'normal' }}>{item.remaining.toLocaleString()} دج</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <h3 style={{ fontSize: '12px', fontWeight: 'bold', margin: '16px 0 6px' }}>سجل الدفعات ({statementData.payments.length})</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>رقم الوصل</th>
+                  <th>التاريخ</th>
+                  <th>طريقة الدفع</th>
+                  <th>المبلغ</th>
+                  <th>ملاحظات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statementData.payments.length === 0 ? (
+                  <tr><td colSpan={5} style={{ textAlign: 'center' }}>لا توجد دفعات مسجلة بعد</td></tr>
+                ) : (
+                  statementData.payments.map((p, idx) => (
+                    <tr key={idx}>
+                      <td>{p.id}</td>
+                      <td>{p.date}</td>
+                      <td>{p.paymentMethod}</td>
+                      <td>{p.amount.toLocaleString()} دج</td>
+                      <td>{p.notes || '-'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+
+            <div style={{ marginTop: '40px', display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
+              <div style={{ textAlign: 'center', width: '30%' }}>
+                <p style={{ fontWeight: 'bold', marginBottom: '30px' }}>توقيع العميل</p>
+                <div style={{ borderTop: '1px solid #999', width: '120px', margin: '0 auto' }}></div>
+              </div>
+              <div style={{ textAlign: 'center', width: '30%' }}>
+                <p style={{ fontWeight: 'bold', marginBottom: '30px' }}>صادق عليها المسؤول</p>
+                <div style={{ borderTop: '1px solid #999', width: '120px', margin: '0 auto' }}></div>
+                <p style={{ fontSize: '9px', marginTop: '4px', color: '#888' }}>لعلاوي عبد المالك</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
