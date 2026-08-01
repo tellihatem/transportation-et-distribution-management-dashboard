@@ -39,6 +39,8 @@ export interface MaterialResaleTx {
   driverCost: number;    // Driver payment
   explicitProfit: number; // Declared profit for transport
   driverName: string;    // Which driver did the delivery
+  tripCount: number;     // Optional: number of trips needed to ship the product (0 = N/A)
+  tripUnitCost: number;  // Optional: cost per trip when multi-trip
   // Read-only: recomputed server-side from the payment ledgers. Never sent by forms.
   clientPaid: number;    // Amount the client has paid so far (toward clientSellingPrice)
   driverPaid: number;    // Amount paid to the driver so far (toward driverCost)

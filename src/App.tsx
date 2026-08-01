@@ -181,6 +181,8 @@ export default function App() {
     driverCost: 5000,
     explicitProfit: 8000,
     driverName: "",
+    tripCount: 0,
+    tripUnitCost: 0,
   });
 
   // Selling price per unit for the resale form. Form-only helper: the record
@@ -372,16 +374,18 @@ export default function App() {
   // soon as it is invoiced whether or not the client has paid.
   const masterNetProfit = (tab1Stats.netMargin + tab2Stats.totalTrueProfit) - tab3Stats.totalOverhead;
 
-  // Actual cash position for the same filtered rows, taken from the payment
-  // ledgers (client_paid / driver_paid are kept in sync by the allocations).
-  // Derived from the same filtered records as the profit above so the two
-  // figures always describe the same period — the /summary endpoints are
-  // all-time and would not line up here.
+  // Actual cash position, taken from the client/driver ledgers (the same
+  // all-time summaries the Client/Driver Accounts tabs use). This is
+  // deliberately NOT scoped to the selected date range: a debt or credit
+  // balance doesn't reset when the operator changes the month filter, and
+  // scoping it by the trip's own date previously meant a payment recorded
+  // against an older invoice silently vanished from this banner whenever the
+  // filter moved to the current month.
   const periodCash = {
-    collected: tab1Stats.clientCollected + tab2Stats.clientCollected,
-    receivable: tab1Stats.clientOutstanding + tab2Stats.clientOutstanding,
-    driverSettled: tab1Stats.driverSettled + tab2Stats.driverSettled,
-    driverPayable: tab1Stats.driverOutstanding + tab2Stats.driverOutstanding,
+    collected: clientSummaries.reduce((sum, c) => sum + c.totalPaymentsReceived, 0),
+    receivable: clientSummaries.reduce((sum, c) => sum + c.outstandingReceivable, 0),
+    driverSettled: driverSummaries.reduce((sum, d) => sum + d.totalPaymentsGiven, 0),
+    driverPayable: driverSummaries.reduce((sum, d) => sum + d.outstandingPayable, 0),
   };
 
   // --- Add / Edit Records Logic ---
@@ -436,6 +440,8 @@ export default function App() {
         driverCost: 5000,
         explicitProfit: 8000,
         driverName: "",
+        tripCount: 0,
+        tripUnitCost: 0,
       });
       setResaleUnitPrice(180000 / 40);
     } else {
@@ -526,7 +532,9 @@ export default function App() {
           truckCost: Number(resaleForm.truckCost) || 0,
           driverCost: Number(resaleForm.driverCost) || 0,
           explicitProfit: Number(resaleForm.explicitProfit) || 0,
-          driverName: resaleForm.driverName || ""
+          driverName: resaleForm.driverName || "",
+          tripCount: Number(resaleForm.tripCount) || 0,
+          tripUnitCost: Number(resaleForm.tripUnitCost) || 0,
         };
 
         if (modalType === "add") {
@@ -791,7 +799,11 @@ export default function App() {
                       <span className="font-mono font-bold text-slate-900">{productSubtotal.toLocaleString()} دج</span>
                     </div>
                     <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
-                      <span className="text-slate-700">سعر النقل والتوصيل</span>
+                      <span className="text-slate-700">
+                        {(selectedReceipt.data.tripCount > 0 && selectedReceipt.data.tripUnitCost > 0)
+                          ? `سعر النقل والتوصيل (${selectedReceipt.data.tripCount} رحلات × ${selectedReceipt.data.tripUnitCost.toLocaleString()} دج)`
+                          : "سعر النقل والتوصيل"}
+                      </span>
                       <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} دج</span>
                     </div>
                     <div className="flex justify-between items-center border-t-2 border-slate-800 pt-2">
@@ -1065,7 +1077,7 @@ export default function App() {
               <button
                 onClick={resetFilters}
                 className="px-3 py-1.5 text-xs bg-slate-800 border border-slate-700/80 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                title="إعادة تعيين إلى جوان 2026"
+                title={`إعادة تعيين إلى ${ALGERIAN_MONTHS[new Date().getMonth()]} ${new Date().getFullYear()}`}
               >
                 مسح التصفية
               </button>
@@ -2192,6 +2204,41 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Optional multi-trip breakdown */}
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                      <span className="text-[10px] text-violet-400 font-bold block">تعدد الرحلات (اختياري)</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-slate-500 mb-1">عدد الرحلات</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={resaleForm.tripCount || ""}
+                            placeholder="0"
+                            onChange={e => setResaleForm(p => ({ ...p, tripCount: parseInt(e.target.value) || 0 }))}
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-500 mb-1">سعر الرحلة الواحدة (دج)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={resaleForm.tripUnitCost || ""}
+                            placeholder="0"
+                            onChange={e => setResaleForm(p => ({ ...p, tripUnitCost: parseInt(e.target.value) || 0 }))}
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                          />
+                        </div>
+                      </div>
+                      {(Number(resaleForm.tripCount) > 0 && Number(resaleForm.tripUnitCost) > 0) && (
+                        <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
+                          <span>إجمالي تكلفة النقل:</span>
+                          <strong className="text-violet-400 font-mono">{(Number(resaleForm.tripCount) * Number(resaleForm.tripUnitCost)).toLocaleString()} دج</strong>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
                   </div>
                 )}
@@ -2419,6 +2466,12 @@ export default function App() {
                         <span>أجرة السائق:</span>
                         <span className="font-mono">{selectedReceipt.data.driverCost.toLocaleString()} دج</span>
                       </div>
+                      {(selectedReceipt.data.tripCount > 0 && selectedReceipt.data.tripUnitCost > 0) && (
+                        <div className="flex justify-between py-1 text-slate-600">
+                          <span>عدد الرحلات:</span>
+                          <span className="font-mono">{selectedReceipt.data.tripCount} × {selectedReceipt.data.tripUnitCost.toLocaleString()} دج = {(selectedReceipt.data.tripCount * selectedReceipt.data.tripUnitCost).toLocaleString()} دج</span>
+                        </div>
+                      )}
                       <div className="flex justify-between py-1 text-slate-600">
                         <span>هامش النقل الصريح:</span>
                         <span className="font-mono text-slate-700">+{selectedReceipt.data.explicitProfit.toLocaleString()} دج</span>

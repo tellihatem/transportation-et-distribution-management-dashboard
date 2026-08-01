@@ -106,6 +106,8 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     driverCost: 5000,
     explicitProfit: 7000,
     driverName: "بلال رحماني",
+    tripCount: 0,
+    tripUnitCost: 0,
     clientPaid: 0,
     driverPaid: 0
   },
@@ -124,6 +126,8 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     driverCost: 7000,
     explicitProfit: 11000,
     driverName: "حسين مقراني",
+    tripCount: 0,
+    tripUnitCost: 0,
     clientPaid: 0,
     driverPaid: 0
   },
@@ -142,6 +146,8 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     driverCost: 4500,
     explicitProfit: 7500,
     driverName: "عمر بوزيد",
+    tripCount: 0,
+    tripUnitCost: 0,
     clientPaid: 0,
     driverPaid: 0
   },
@@ -160,6 +166,8 @@ export const INITIAL_RESALE_TXS: MaterialResaleTx[] = [
     driverCost: 6000,
     explicitProfit: 8000,
     driverName: "بلال رحماني",
+    tripCount: 0,
+    tripUnitCost: 0,
     clientPaid: 0,
     driverPaid: 0
   }
