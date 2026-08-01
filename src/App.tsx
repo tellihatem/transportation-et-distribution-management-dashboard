@@ -676,6 +676,38 @@ export default function App() {
             visibility: visible !important;
             color: black !important;
           }
+          /* Statement of Account print container — same pattern */
+          .print-statement-container {
+            display: block !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
+            direction: rtl !important;
+            padding: 20px !important;
+            color: black !important;
+            background: white !important;
+          }
+          .print-statement-container * {
+            visibility: visible !important;
+            color: black !important;
+          }
+          .print-statement-container table {
+            border-collapse: collapse !important;
+            width: 100% !important;
+          }
+          .print-statement-container th,
+          .print-statement-container td {
+            border: 1px solid #888 !important;
+            padding: 4px 8px !important;
+            text-align: right !important;
+            font-size: 10px !important;
+          }
+          .print-statement-container th {
+            background: #eee !important;
+            font-weight: bold !important;
+          }
           .recharts-responsive-container {
             width: 100% !important;
             height: 300px !important;
@@ -745,24 +777,48 @@ export default function App() {
                 : selectedReceipt.data.clientSellingPrice;
               const facturePaid = selectedReceipt.data.clientPaid || 0;
               const factureRemaining = factureTotal - facturePaid;
-              // The service price shown to the client is the full amount they owe.
-              // It must NOT be the internal (كراء + أجرة السائق) subtotal: printing
-              // that next to the total would let the client subtract the two and
-              // derive the company's margin (أرباح المؤسسة الصافية).
-              const servicePrice = factureTotal;
+
+              if (selectedReceipt.type === "resale") {
+                const unitPrice = selectedReceipt.data.factoryPurchasePrice || 0;
+                const qty = selectedReceipt.data.totalTonnage || 0;
+                const unit = selectedReceipt.data.quantityUnit || "طن";
+                const productSubtotal = unitPrice * qty;
+                const transportPrice = factureTotal - productSubtotal;
+                return (
+                  <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-700">ثمن البضاعة ({qty} {unit} × {unitPrice.toLocaleString()} دج)</span>
+                      <span className="font-mono font-bold text-slate-900">{productSubtotal.toLocaleString()} دج</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
+                      <span className="text-slate-700">سعر النقل والتوصيل</span>
+                      <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} دج</span>
+                    </div>
+                    <div className="flex justify-between items-center border-t-2 border-slate-800 pt-2">
+                      <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
+                      <span className="text-2xl font-mono font-bold text-slate-950">{factureTotal.toLocaleString()} دج</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
+                      <span className="text-slate-700">المدفوع</span>
+                      <span className="font-mono font-bold text-slate-900">{facturePaid.toLocaleString()} دج</span>
+                    </div>
+                    <div className="flex justify-between items-center text-base">
+                      <span className="font-bold text-slate-900">المتبقي</span>
+                      <span className="font-mono font-bold text-slate-950">{factureRemaining.toLocaleString()} دج</span>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-700">
-                      {selectedReceipt.type === "transport" ? "سعر النقل" : "سعر البضاعة والنقل"}
-                    </span>
-                    <span className="font-mono font-bold text-slate-900">{servicePrice.toLocaleString()} دج</span>
+                    <span className="text-slate-700">سعر النقل</span>
+                    <span className="font-mono font-bold text-slate-900">{factureTotal.toLocaleString()} دج</span>
                   </div>
                   <div className="flex justify-between items-center border-t border-slate-300 pt-2">
                     <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
-                    <span className="text-2xl font-mono font-bold text-slate-950">
-                      {factureTotal.toLocaleString()} دج
-                    </span>
+                    <span className="text-2xl font-mono font-bold text-slate-950">{factureTotal.toLocaleString()} دج</span>
                   </div>
                   <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
                     <span className="text-slate-700">المدفوع</span>
