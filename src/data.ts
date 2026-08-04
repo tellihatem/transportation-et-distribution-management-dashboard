@@ -3,17 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Translations and helpers specifically for fleet transportation & expenses
+import { T } from "./strings";
+
+// Translations and helpers specifically for fleet transportation & expenses.
+// The Arabic labels themselves live in src/strings.ts (T.expenseCategory) so
+// all user-visible wording stays in one place.
 export const TRANSLATE_EXPENSE_CATEGORY: Record<string, string> = {
-  "Fuel": "وقود ومحروقات",
-  "Spare Parts": "قطع غيار وميكانيك",
-  "Fines": "غرامات ومخالفات الطرق",
-  "Admin": "مصاريف إدارية ومكتبية"
+  "Fuel": T.expenseCategory.fuel,
+  "Spare Parts": T.expenseCategory.spareParts,
+  "Fines": T.expenseCategory.fines,
+  "Admin": T.expenseCategory.admin
 };
 
 export const EXPENSE_CATEGORIES = [
-  { value: "Fuel", label: "وقود ومحروقات" },
-  { value: "Spare Parts", label: "قطع غيار وميكانيك" },
-  { value: "Fines", label: "غرامات ومخالفات الطرق" },
-  { value: "Admin", label: "مصاريف إدارية ومكتبية" }
+  { value: "Fuel", label: T.expenseCategory.fuel },
+  { value: "Spare Parts", label: T.expenseCategory.spareParts },
+  { value: "Fines", label: T.expenseCategory.fines },
+  { value: "Admin", label: T.expenseCategory.admin }
 ];
