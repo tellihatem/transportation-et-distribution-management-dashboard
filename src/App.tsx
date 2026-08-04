@@ -61,7 +61,7 @@ import { useDriverPayments } from "./hooks/useDriverPayments";
 import { ClientAccountsTab } from "./components/ClientAccountsTab";
 import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
-import { downloadBackup, importBackup, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
+import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
 import logoUrl from "../assets/canvas.png";
 import { T } from "./strings";
 
@@ -614,6 +614,27 @@ export default function App() {
     }
   };
 
+  // --- Wipe the database ---
+  // Deliberately gated behind a typed word rather than a plain confirm(): this
+  // deletes every record and cannot be undone, and it is reachable from the
+  // main header where a stray click is otherwise easy.
+  const [isResetOpen, setIsResetOpen] = useState(false);
+  const [resetTyped, setResetTyped] = useState("");
+  const [resetting, setResetting] = useState(false);
+
+  const handleResetConfirm = async () => {
+    if (resetTyped.trim() !== T.reset.confirmWord) return;
+    setResetting(true);
+    try {
+      const result = await resetAllData();
+      alert(T.reset.done(result.total));
+      window.location.reload();
+    } catch (err: any) {
+      alert(T.reset.failed(err.message));
+      setResetting(false);
+    }
+  };
+
   // Stacked chart data formatting for Tab 1 Cost breakdown
   const tab1ChartData = useMemo(() => {
     return filteredClientTrips.slice(0, 10).map(trip => ({
@@ -910,6 +931,14 @@ export default function App() {
                 >
                   <Upload className="h-3.5 w-3.5" />
                   <span className="hidden lg:inline">{T.header.importBackup}</span>
+                </button>
+                <button
+                  onClick={() => { setResetTyped(""); setIsResetOpen(true); }}
+                  title={T.header.resetDataTitle}
+                  className="flex items-center gap-1.5 bg-rose-950/60 hover:bg-rose-900/60 border border-rose-900 text-rose-300 text-xs px-3 py-1.5 rounded-lg transition"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden lg:inline">{T.header.resetData}</span>
                 </button>
                 <input
                   ref={importFileInputRef}
@@ -1815,6 +1844,55 @@ export default function App() {
         </section>
 
       </div>
+
+      {/* RENDER MODAL: WIPE THE DATABASE (irreversible — typed confirmation) */}
+      {isResetOpen && (
+        <div className="no-print fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-900/70 max-w-md w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative dir-rtl">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-600 to-red-500"></div>
+
+            <h3 className="text-base font-extrabold text-white flex items-center gap-2 mb-3">
+              <Trash2 className="h-4.5 w-4.5 text-rose-500" />
+              {T.reset.title}
+            </h3>
+
+            <p className="text-xs text-slate-300 leading-relaxed mb-2">{T.reset.body}</p>
+            <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2 mb-4">
+              {T.reset.backupHint}
+            </p>
+
+            <label className="block text-xs text-slate-400 mb-1">
+              {T.reset.confirmPrompt(T.reset.confirmWord)}
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={resetTyped}
+              onChange={e => setResetTyped(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 p-2 rounded-lg text-white font-bold mb-5"
+            />
+
+            <div className="flex justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={resetting}
+                onClick={() => setIsResetOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition disabled:opacity-50"
+              >
+                {T.reset.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={resetting || resetTyped.trim() !== T.reset.confirmWord}
+                onClick={handleResetConfirm}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold transition"
+              >
+                {resetting ? T.reset.working : T.reset.submit}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* RENDER MODAL: FOR ADD/EDIT WORKFLOW */}
       <AnimatePresence>

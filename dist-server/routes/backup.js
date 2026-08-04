@@ -66,6 +66,31 @@ router.get('/export', (0, error_handler_1.asyncHandler)(async (_req, res) => {
     res.json(backup);
 }));
 /**
+ * POST /api/backup/reset — Deletes every business record, leaving an empty
+ * database. Exists so an operator can clear leftover or test data from inside
+ * the app, instead of having to find and delete the database file by hand
+ * (it lives in the OS user-data folder, which uninstalling does not remove).
+ * Schema and migrations are untouched. Requires { confirm: true }.
+ */
+router.post('/reset', (0, error_handler_1.asyncHandler)(async (req, res) => {
+    if (!req.body?.confirm) {
+        throw (0, error_handler_1.createApiError)('Reset will permanently DELETE all records. Send { "confirm": true } to proceed.', 400, 'CONFIRMATION_REQUIRED');
+    }
+    const deleted = {};
+    const resetTransaction = database_1.default.transaction(() => {
+        // Children before parents: the allocation tables carry FK references.
+        for (const table of [...TABLES].reverse()) {
+            deleted[table] = database_1.default.prepare(`DELETE FROM ${table}`).run().changes;
+        }
+    });
+    resetTransaction();
+    // Reclaim the freed pages so the file on disk actually shrinks.
+    database_1.default.exec('VACUUM');
+    const total = Object.values(deleted).reduce((sum, n) => sum + n, 0);
+    console.log(`[BACKUP] Reset complete — ${total} record(s) deleted.`);
+    res.json({ success: true, data: { deleted, total } });
+}));
+/**
  * POST /api/backup/import — Restores from a previously exported JSON backup.
  * REPLACES all local data for the three business tables. Requires { confirm: true }.
  */

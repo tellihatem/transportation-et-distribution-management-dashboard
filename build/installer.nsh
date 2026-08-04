@@ -24,4 +24,19 @@
   DetailPrint "إزالة شهادة التوقيع الرقمي..."
   nsExec::ExecToLog '"$SYSDIR\certutil.exe" -user -delstore TrustedPublisher "Hatem Telli"'
   Pop $0
+
+  ; The database lives in the per-user data folder, NOT under $INSTDIR, so a
+  ; normal uninstall leaves it behind and the next install re-opens the same
+  ; records. Offer to remove it, defaulting to "No" so an accidental yes-click
+  ; can't destroy real business data.
+  ;
+  ; Skipped entirely on a silent uninstall: electron-builder runs one of those
+  ; as part of an in-place upgrade, where wiping the user's data would be wrong.
+  IfSilent skip_appdata_cleanup
+  MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 \
+    "هل تريد أيضاً حذف قاعدة البيانات وجميع السجلات المحفوظة؟$\n$\nاختر «لا» للاحتفاظ ببياناتك." \
+    IDNO skip_appdata_cleanup
+  DetailPrint "حذف قاعدة البيانات وبيانات التطبيق..."
+  RMDir /r "$APPDATA\logistics-financial-dashboard"
+  skip_appdata_cleanup:
 !macroend

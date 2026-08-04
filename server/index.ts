@@ -15,7 +15,7 @@ import fs from 'fs';
 // Load .env from project root
 config({ path: path.resolve(process.cwd(), '.env') });
 
-import db, { runMigrations, seedIfEmpty } from './database';
+import db, { runMigrations, DATABASE_FILE } from './database';
 import { errorHandler } from './middleware/error-handler';
 import { processSyncQueue } from './sync/replicator';
 
@@ -111,15 +111,24 @@ console.log('\n[SERVER] 🚛 Logistics Financial Dashboard — Backend Server');
 console.log('[SERVER] ─────────────────────────────────────────────────');
 
 runMigrations();
-seedIfEmpty();
+console.log(`[DB] Using database file: ${DATABASE_FILE}`);
 
-// Health check (public, no auth — used for uptime monitoring)
+// Health check (public, no auth — used for uptime monitoring).
+// Reports the database file in use: if unexpected records ever show up, the
+// first question is which file is being read, and this answers it directly.
 app.get('/api/health', (_req, res) => {
+  const counts: Record<string, number> = {};
+  for (const table of ['client_trips', 'material_resales', 'expenses']) {
+    counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as any).c;
+  }
+
   res.json({
     success: true,
     service: 'logistics-dashboard-api',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    databaseFile: DATABASE_FILE,
+    recordCounts: counts,
   });
 });
 

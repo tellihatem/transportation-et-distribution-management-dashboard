@@ -23,6 +23,13 @@ function resolveDataDir(): string {
 const DATA_DIR = resolveDataDir();
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'logistics.db');
 
+/**
+ * The database file actually in use. Exported so the running app can report
+ * it (see /api/health) — when records show up unexpectedly, the first thing
+ * worth knowing is which file is being read.
+ */
+export const DATABASE_FILE = DB_PATH;
+
 // Ensure data directory exists
 if (!fs.existsSync(path.dirname(DB_PATH))) {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -72,12 +79,8 @@ export function runMigrations(): void {
   console.log('[DB] All migrations complete.');
 }
 
-/**
- * No-op in production — the client's database starts empty.
- * Seed data was used during development only.
- */
-export function seedIfEmpty(): void {
-  // Production databases start empty — no test data inserted.
-}
+// NOTE: there is deliberately no seeding function here. Databases start empty
+// and are only ever filled by the operator, by a backup import, or by a cloud
+// restore. Records must never appear on their own.
 
 export default db;

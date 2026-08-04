@@ -13,7 +13,7 @@
  *    - Never change the names on the left of the colon (e.g. `companyName:`),
  *      and never remove a line — the app looks text up by those names.
  *    - Lines that look like `(n) => \`... ${n} ...\`` contain a value the app
- *      fills in at runtime. Keep the `${...}` part exactly as it is; move it
+ *      fills in at runtime. Keep the `${...}` part ly as it is; move it
  *      within the sentence if Arabic word order needs it.
  *    - Text is right-to-left Arabic. "دج" is the Algerian dinar currency mark.
  *
@@ -42,9 +42,9 @@ export const T = {
     /** Company name — appears in the app header, invoices and statements. */
     companyName: "نقل وتوزيع البضائع لعلاوي عبد المالك",
     /** Small badge next to the company name in the header. */
-    safeModeBadge: "بيئة آمنة",
+    safeModeBadge: "وضع آمن",
     /** One-line description of what the app does, under the company name. */
-    tagline: "مراقبة وتدقيق تكاليف الشحن، الأرباح المستترة، ومصاريف الأسطول البري",
+    tagline: "مراقبة وتدقيق تكاليف الشحن، الأرباح ، ومصاريف الأسطول البري",
     /** Label above the owner's name in the header. */
     managerLabel: "المسؤول",
     /** The owner / person responsible. */
@@ -96,7 +96,7 @@ export const T = {
     /** KPI card 1 title: total value of everything invoiced to clients. */
     invoicedTurnover: "رقم الأعمال المفوتر",
     /** Sub-line of card 1: cash actually received. */
-    cashCollectedLabel: "المحصل نقداً:",
+    cashCollectedLabel: "المحصّل نقداً:",
     /** KPI card 2 title: the company's real net profit. */
     netProfit: "صافي أرباح الشركة الفعلي",
     /** Sub-line of card 2: net profit as a percentage. */
@@ -116,8 +116,8 @@ export const T = {
     chartAmountLabel: "المبلغ",
     /** Bar labels in the comparison chart. */
     chartBars: {
-      invoiced: "إجمالي المفتور",
-      collected: "المحصل نقداً",
+      invoiced: "إجمالي الفواتير",
+      collected: "المحصّل نقداً",
       clientDebts: "ديون العملاء",
       driverPayouts: "مدفوعات السائقين",
       operatingCosts: "مصاريف تشغيلية",
@@ -131,11 +131,11 @@ export const T = {
     /** Quick link: go to the client accounts screen. */
     quickLinkClients: "تسجيل دفعات وتصفية حسابات العملاء",
     /** Quick link: go to the driver settlements screen. */
-    quickLinkDrivers: "تصفية أجور ومستحقات السائقين",
+    quickLinkDrivers: "تسوية أجور ومستحقات السائقين",
     /** Quick links that show a record count in brackets. */
     quickLinkTrips: (count: number) => `سجل رحلات نقل العملاء (${count})`,
     quickLinkResales: (count: number) => `سجل عمليات بيع المواد (${count})`,
-    quickLinkExpenses: (count: number) => `سجل الأعباء والمصاريف الأخرى (${count})`,
+    quickLinkExpenses: (count: number) => `سجل المصاريف والمصاريف الأخرى (${count})`,
   },
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ export const T = {
     /* --- The four summary cards at the top --- */
     kpiInvoiced: "إجمالي الفواتير للعملاء",
     kpiInvoicedHint: "مجموع رحلات النقل وبيع المواد",
-    kpiCollected: "إجمالي المقبوضات (المحصل)",
+    kpiCollected: "إجمالي المبالغ المبلغ المقبوضة (المحصّل)",
     kpiCollectedHint: "السيولة النقدية المستلمة فعلياً",
     kpiOutstanding: "ديون العملاء المتبقية",
     kpiOutstandingHint: "مبالغ مستحقة على الرحلات غير المكتملة التسديد",
@@ -159,15 +159,15 @@ export const T = {
 
     /* --- Column headings of the client list --- */
     colName: "اسم العميل",
-    colInvoiced: "إجمالي المفتور",
-    colCollected: "إجمالي المقبوضات",
+    colInvoiced: "إجمالي الفواتير",
+    colCollected: "إجمالي المبالغ المبلغ المقبوضة",
     colOutstanding: "الرصيد المتبقي (دين)",
     colAdvance: "الرصيد المسبق (عربون)",
     colTripCount: "عدد الرحلات",
     colActions: "الإجراءات",
 
     /* --- States and per-row text in the client list --- */
-    loading: "جاري تحميل حسابات العملاء...",
+    loading: "جارٍ تحميل حسابات العملاء...",
     empty: "لا توجد بيانات حسابات عملاء تطابق البحث.",
     /** Shown instead of an amount when a client owes nothing. */
     fullyPaid: "خالص بالكامل",
@@ -182,9 +182,9 @@ export const T = {
     fieldReceiptNo: "رقم الوصل",
     fieldDate: "التاريخ",
     fieldClientName: "اسم العميل",
-    /** NOTE: the English word "exact" is currently mixed into this Arabic
+    /** NOTE: the English word "" is currently mixed into this Arabic
      *  placeholder — worth rewording. */
-    fieldClientNamePlaceholder: "أدخل اسم العميل exact",
+    fieldClientNamePlaceholder: "أدخل اسم العميل ",
     fieldAmount: "المبلغ المسدد (دج)",
     fieldPaymentMethod: "طريقة الدفع",
     methodCash: "نقداً",
@@ -207,13 +207,13 @@ export const T = {
     /* --- "Statement of account" dialog (on screen) --- */
     statementTitle: "كشف حساب تفصيلي للعميل:",
     printButton: "طباعة الكشف",
-    statementLoading: "جاري تحميل بيانات كشف الحساب...",
+    statementLoading: "جارٍ تحميل بيانات كشف الحساب...",
     statementEmpty: "لم يتم العثور على بيانات لهذا العميل.",
     stmtTotalInvoiced: "إجمالي قيمة الخدمات/المواد",
     stmtTotalPaid: "إجمالي المبالغ المسددة",
     stmtOutstanding: "الرصيد المتبقي (دين مستحق)",
     stmtAdvance: "الرصيد المسبق (عربون)",
-    stmtTripsHeading: (count: number) => `سجل الرحلات والمعاملات المفتورة (${count})`,
+    stmtTripsHeading: (count: number) => `سجل الرحلات والمعاملات المفوترة (${count})`,
     stmtColDate: "التاريخ",
     stmtColType: "نوع المعاملة",
     stmtColId: "رقم المعاملة",
@@ -225,7 +225,7 @@ export const T = {
     /** The two kinds of transaction a client can be billed for. */
     typeTransport: "نقل عميل",
     typeResale: "بيع مواد",
-    stmtPaymentsHeading: (count: number) => `سجل الدفعات والمقبوضات المسجلة (${count})`,
+    stmtPaymentsHeading: (count: number) => `سجل الدفعات والمبالغ المبلغ المقبوضة المسجلة (${count})`,
     stmtPayColReceipt: "رقم الوصل",
     stmtPayColDate: "التاريخ",
     stmtPayColMethod: "طريقة الدفع",
@@ -237,7 +237,7 @@ export const T = {
     printTitle: "كشف حساب تفصيلي",
     printClientLabel: "العميل:",
     printSummaryInvoiced: "إجمالي الفواتير",
-    printSummaryPaid: "إجمالي المسددات",
+    printSummaryPaid: "إجمالي المبالغ المسددة",
     printSummaryOutstanding: "الرصيد المتبقي (دين)",
     printSummaryAdvance: "الرصيد المسبق (عربون)",
     printTripsHeading: (count: number) => `سجل الرحلات والمعاملات (${count})`,
@@ -250,7 +250,7 @@ export const T = {
   },
 
   /* ────────────────────────────────────────────────────────────────────────
-   *  تصفية السائقين — Driver settlements tab
+   *  تسوية حسابات السائقين — Driver settlements tab
    *  Tracks what each driver earned, what they were paid, and what is owed.
    * ──────────────────────────────────────────────────────────────────────── */
   driverAccounts: {
@@ -260,13 +260,13 @@ export const T = {
     kpiPaid: "إجمالي ما تم دفعه للسائقين",
     kpiPaidHint: "مبالغ التصفيات والسلف المسلمة فعلياً",
     kpiPayable: "مستحقات معلقة واجبة الدفع",
-    kpiPayableHint: "أجور رحلات غير مصفاة بعد",
+    kpiPayableHint: "أجور رحلات غير مسددة بعد",
     kpiAdvance: "إجمالي سلف السائقين",
     kpiAdvanceHint: "دفعت كسلفة قبل تصفية الرحلات",
 
     /* --- Search box and the main action button --- */
     searchPlaceholder: "بحث باسم السائق...",
-    recordPayoutButton: "تصفية مستحقات / دفع دفعة لسائق",
+    recordPayoutButton: "تسوية المستحقات / دفع دفعة لسائق",
 
     /* --- Column headings of the driver list --- */
     colName: "اسم السائق",
@@ -278,20 +278,20 @@ export const T = {
     colActions: "الإجراءات",
 
     /* --- States and per-row text in the driver list --- */
-    loading: "جاري تحميل حسابات السائقين...",
+    loading: "جارٍ تحميل حسابات السائقين...",
     empty: "لا توجد بيانات حسابات سائقين تطابق البحث.",
     /** Shown instead of an amount when a driver is owed nothing. */
     fullySettled: "مصفى بالكامل",
     /** Advance-balance cell suffix, e.g. "+٥٠٠٠ دج سلفة". */
     advanceSuffix: "سلفة",
-    /** Trip count cell, e.g. "٣ رحلة (١ غير مصفاة)". */
-    tripCountCell: (unsettled: number) => `رحلة (${unsettled} غير مصفاة)`,
+    /** Trip count cell, e.g. "٣ رحلة (١ غير مسددة)". */
+    tripCountCell: (unsettled: number) => `رحلة (${unsettled} غير مسددة)`,
     /** Row buttons. */
     payoutAction: "تصفية / دفع",
     statementAction: "كشف حساب",
 
     /* --- "Pay a driver" dialog --- */
-    payoutModalTitle: "تصفية مستحقات / دفع للسائق",
+    payoutModalTitle: "تسوية المستحقات / دفع للسائق",
     fieldReceiptNo: "رقم الوصل",
     fieldDate: "التاريخ",
     fieldDriverName: "اسم السائق",
@@ -300,7 +300,7 @@ export const T = {
     fieldPayoutType: "نوع الدفعة",
     /** The kinds of payment a driver can receive. These values are also
      *  stored in the database, so changing them affects existing records. */
-    payoutTypeSettlement: "تصفية رحلات",
+    payoutTypeSettlement: "تسوية الرحلات",
     payoutTypeAdvance: "سلفة",
     payoutTypeBonus: "مكافأة",
     /** How the money should be applied to unsettled trips. */
@@ -308,7 +308,7 @@ export const T = {
     allocationAuto: "تلقائي (تصفية أقدم الرحلات)",
     allocationAutoHint: "تطبيق الدفعة لتصفية أجور الرحلات القديمة أولاً",
     allocationNone: "تسجيل كسلفة مسبقة",
-    allocationNoneHint: "تسجيل المبلغ كسلفة على السائق دون تصفية رحلات سابقة",
+    allocationNoneHint: "تسجيل المبلغ كسلفة على السائق دون تسوية الرحلات سابقة",
     fieldNotes: "ملاحظات / تفاصيل",
     fieldNotesPlaceholder: "ملاحظات عن التصفية...",
     cancel: "إلغاء",
@@ -320,7 +320,7 @@ export const T = {
     /* --- "Statement of account" dialog (on screen) --- */
     statementTitle: "كشف حساب أجور ومستحقات السائق:",
     printButton: "طباعة الكشف",
-    statementLoading: "جاري تحميل بيانات كشف حساب السائق...",
+    statementLoading: "جارٍ تحميل بيانات كشف حساب السائق...",
     statementEmpty: "لم يتم العثور على بيانات لهذا السائق.",
     stmtTotalEarned: "إجمالي الأجور المستحقة",
     stmtTotalPaid: "إجمالي المدفوع له فعلياً",
@@ -382,7 +382,7 @@ export const T = {
     /** Month names in the Algerian (French-derived) convention, Jan → Dec.
      *  Order matters — do not reorder. */
     months: ["جانفي", "فيفري", "مارس", "أفريل", "ماي", "جوان",
-             "جويلية", "أوت", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"],
+      "جويلية", "أوت", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"],
   },
   units: {
     /** Suggested units offered in the quantity dropdown. The field is free
@@ -441,6 +441,31 @@ export const T = {
     exportBackupTitle: "تصدير نسخة احتياطية من قاعدة البيانات",
     importBackup: "استيراد نسخة احتياطية",
     importBackupTitle: "استيراد نسخة احتياطية إلى قاعدة البيانات",
+    /** Danger button: wipes every record in the database. */
+    resetData: "تفريغ قاعدة البيانات",
+    resetDataTitle: "حذف جميع السجلات نهائياً من قاعدة البيانات",
+  },
+
+  /* ────────────────────────────────────────────────────────────────────────
+   *  تفريغ قاعدة البيانات — "Delete everything" dialog
+   *  Used to clear leftover or trial data. The action cannot be undone, so
+   *  the operator has to type a word to confirm.
+   * ──────────────────────────────────────────────────────────────────────── */
+  reset: {
+    title: "تفريغ قاعدة البيانات نهائياً",
+    /** Explains exactly what will be deleted. */
+    body: "سيتم حذف كل الرحلات وعمليات البيع والمصاريف ودفعات العملاء والسائقين نهائياً. لا يمكن التراجع عن هذه العملية.",
+    /** Advice to take a backup first. */
+    backupHint: "ننصح بتصدير نسخة احتياطية قبل المتابعة.",
+    /** The operator must type this word to unlock the button. */
+    confirmWord: "حذف",
+    confirmPrompt: (word: string) => `اكتب كلمة «${word}» للتأكيد:`,
+    cancel: "إلغاء",
+    submit: "حذف جميع البيانات",
+    working: "جاري الحذف...",
+    /** Shown after a successful wipe; the app reloads straight after. */
+    done: (total: number) => `تم حذف ${total} سجل. قاعدة البيانات فارغة الآن.`,
+    failed: (message: string) => `تعذر تفريغ قاعدة البيانات: ${message}`,
   },
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -455,7 +480,7 @@ export const T = {
     fleetExpenses: "مصاريف الأسطول المدفوعة",
     netProfit: "صافي ربح الشركة",
     /** The four cash-position boxes underneath the formula. */
-    cashCollected: "المحصل من العملاء",
+    cashCollected: "المحصّل من العملاء",
     cashReceivable: "متبقي على العملاء",
     driverPaid: "المدفوع للسائقين",
     driverPayable: "متبقي للسائقين",
@@ -486,7 +511,7 @@ export const T = {
     transport: "رحلات نقل العملاء",
     resale: "بيع وتوصيل المواد",
     clients: "حسابات العملاء",
-    drivers: "تصفية السائقين",
+    drivers: "تسوية حسابات السائقين",
     expenses: "مصاريف الأسطول الأُخرى",
   },
 
@@ -545,14 +570,14 @@ export const T = {
     kpiVisibleTransport: "أجور النقل الظاهرة",
     kpiVisibleTransportHint: "رسوم النقل المقيدة على المعاملة",
     kpiTrueProfit: "إجمالي الربح الحقيقي",
-    kpiTrueProfitHint: "يشمل الكسب المستتر والهامش الظاهر",
+    kpiTrueProfitHint: "يشمل الربح الخفي والهامش الظاهر",
     kpiClientOutstanding: "متبقي على العملاء",
     kpiClientOutstandingHint: "مبالغ لم يسددها الزبائن بعد",
     kpiDriverOutstanding: "متبقي للسائقين",
     kpiDriverOutstandingHint: "مستحقات لم تُدفع للسائقين بعد",
 
     chartTitle: "مقارنة كلفة شراء السلع بعوائد البيع",
-    chartSubtitle: "يعكس بوضوح الكفاءة النقدية للشركة وإجمالي الكسب المستتر",
+    chartSubtitle: "يعكس بوضوح الكفاءة النقدية للشركة وإجمالي الربح الخفي",
     chartEmpty: "لا توجد بيانات كافية",
     legendPurchase: "كلفة الشراء",
     legendSales: "مبيعات التوريد",
@@ -564,7 +589,7 @@ export const T = {
     colDate: "التاريخ",
     colEndClient: "الزبون النهائي",
     colPricing: "تفاصيل الأسعار",
-    colHiddenMargin: "الهامش المستتر",
+    colHiddenMargin: "الهامش الخفي",
     colTrueProfit: "إجمالي الكسب الحقيقي",
     colClientPayments: "مدفوعات العميل",
     colDriverPayments: "السائق ومدفوعاته",
@@ -580,11 +605,11 @@ export const T = {
    *  تبويب مصاريف الأسطول — Fleet expenses tab
    * ──────────────────────────────────────────────────────────────────────── */
   expenses: {
-    kpiCount: "سجلات الأعباء الكلية",
+    kpiCount: "سجلات المصاريف الكلية",
     kpiCountHint: "عمليّة صرف تشغيلية مسجلة",
-    kpiTotal: "إجمالي المصاريف والمحروقات",
-    kpiTotalHint: "المصاريف المدفوعة فقط (لا تشمل المعلّقة)",
-    kpiPending: "الأعباء المعلّقة",
+    kpiTotal: "إجمالي المصاريف والوقود",
+    kpiTotalHint: "المصاريف المدفوعة فقط (لا تشمل المعلقة)",
+    kpiPending: "المصاريف المعلقة",
     kpiPendingHint: "قيد الدراسة ولم تُحتسب ضمن المصاريف",
 
     chartTitle: "تقسيم النفقات التشغيلية",
@@ -603,12 +628,12 @@ export const T = {
     empty: "لا توجد مصاريف مقيدة.",
     /** Status shown in the table. */
     statusPaid: "مدفوعة",
-    statusPendingShort: "معلّقة",
+    statusPendingShort: "معلقة",
     /** Same two states as worded in the form dropdown. NOTE: the pending
      *  state is worded differently here than in the table above. */
-    statusPendingLong: "قيد الدراسة والمطالبة",
+    statusPendingLong: "قيد المراجعة",
     /** Used when no truck plate was entered. */
-    unknownPlate: "عام مجهول",
+    unknownPlate: "غير محدد",
   },
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -631,9 +656,9 @@ export const T = {
     clientNamePlaceholder: "مثال: شركة بوعمامة للبناء",
     driverName: "اسم السائق",
     tripDriverPlaceholder: "السائق المكلف بالرحلة",
-    originFactory: "المصنع المصدر للسلعة",
+    originFactory: "الالمصنع المورّد للمادة",
     originFactoryPlaceholder: "مصنع الأسمنت",
-    destination: "وجهة النكوص والمسار",
+    destination: "الوجهة والمسار",
     destinationPlaceholder: "موقع 1500 مسكن",
     materialType: "نوع المادة المشحونة",
     materialPlaceholder: "حصى أو إسمنت",
@@ -641,7 +666,7 @@ export const T = {
     unitPlaceholder: "الوحدة",
     /** Cost breakdown box for a transport trip. */
     costBreakdownTitle: "تجزئة التكلفة والصافي",
-    truckHire: "كراء الشاحنة",
+    truckHire: "تأجير الشاحنة",
     driverWage: "أجرة السائق",
     companyProfit: "ربح الشركة الصافي",
     estimatedTotalFee: "إجمالي تعريفة النقل التقديرية للعميل:",
@@ -649,7 +674,7 @@ export const T = {
     /* --- Resale fields --- */
     resaleId: "رقم عملية التوريد",
     endClient: "العميل النهائي المستلم للسلعة",
-    endClientPlaceholder: "مشترين الجملة الخارجيين",
+    endClientPlaceholder: "عملاء الجملة",
     resaleDestination: "الوجهة (المكان الذي ستُنقل إليه السلعة)",
     resaleDestinationPlaceholder: "موقع التسليم النهائي",
     resaleDriverPlaceholder: "السائق المكلف بالتوصيل",
@@ -661,10 +686,10 @@ export const T = {
     totalSellingPrice: "السعر البيعي الإجمالي للزبون",
     totalSellingPricePlaceholder: "ثمن المادة + ثمن خدمات الشحن ككل",
     /** Logistics cost box for a resale. */
-    logisticsTitle: "تحليل كلفة النظير اللوجستي الصريح",
+    logisticsTitle: "تحليل تحليل التكلفة اللوجستية",
     resaleDriverCost: "كلفة السائق",
     explicitMargin: "الهامش البارز",
-    hiddenMarginLabel: "قيمة الكسب المستتر:",
+    hiddenMarginLabel: "قيمة الربح الخفي:",
     trueProfitLabel: "إجمالي صافي الربح الحقيقي:",
     /** Optional multi-trip box. */
     multiTripTitle: "تعدد الرحلات (اختياري)",
@@ -713,7 +738,7 @@ export const T = {
     signDriverAndManager: "توقيع السائق والمسؤول",
     signClientStamp: "إمضاء وختم العميل",
     /** Small print at the very bottom. */
-    footerNote: "وصل شحن محمي للنظام الداخلي - لا يتطلب ختم السحابة الإلكترونية",
+    footerNote: "وصل شحن داخلي معتمد للنظام",
   },
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -729,9 +754,9 @@ export const T = {
     docSubtitle: "وصل شحن داخلي رسمي",
 
     /* --- Transport breakdown --- */
-    costSheetTitle: "منشور تكلفة الشحن",
-    currencyNote: "عملة الحساب: الدينار الجزائري",
-    truckHire: "صرف كراء المركبة:",
+    costSheetTitle: "تفاصيل تكلفة الشحن",
+    currencyNote: "العملة: الدينار الجزائري",
+    truckHire: "صرف تأجير المركبة:",
     driverWage: "أجرة السائق:",
     companyProfit: "أرباح المؤسسة الصافية:",
     invoiceTotal: "مجموع الفاتورة الكلي:",
@@ -742,12 +767,12 @@ export const T = {
     soldMaterialLabel: "المادة المباعة:",
     factoryPriceLabel: "سعر شراء المصنع:",
     goodsTotalCostLabel: "كلفة السلع الكلية:",
-    pricingAnalysisTitle: "تحليل الهياكل والتسعير اللوجستي الشامل",
+    pricingAnalysisTitle: "تحليل التسعير والتحليل اللوجستي",
     recordNoLabel: "رقم:",
-    truckHireLong: "كراء الشاحنة البرية:",
+    truckHireLong: "تأجير الشاحنة البرية:",
     tripCountLabel: "عدد الرحلات:",
     explicitTransportMargin: "هامش النقل الصريح:",
-    hiddenProfit: "الأرباح المستترة من التسعير:",
+    hiddenProfit: "الأرباح الخفية من التسعير:",
     finalSellingTotal: "سعر البيع النهائي الإجمالي:",
     buyerPaid: "المدفوع من الزبون:",
     buyerRemaining: "المتبقي على الزبون:",

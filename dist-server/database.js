@@ -7,8 +7,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DATABASE_FILE = void 0;
 exports.runMigrations = runMigrations;
-exports.seedIfEmpty = seedIfEmpty;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
@@ -26,6 +26,12 @@ function resolveDataDir() {
 }
 const DATA_DIR = resolveDataDir();
 const DB_PATH = process.env.DATABASE_PATH || path_1.default.join(DATA_DIR, 'logistics.db');
+/**
+ * The database file actually in use. Exported so the running app can report
+ * it (see /api/health) — when records show up unexpectedly, the first thing
+ * worth knowing is which file is being read.
+ */
+exports.DATABASE_FILE = DB_PATH;
 // Ensure data directory exists
 if (!fs_1.default.existsSync(path_1.default.dirname(DB_PATH))) {
     fs_1.default.mkdirSync(path_1.default.dirname(DB_PATH), { recursive: true });
@@ -69,11 +75,7 @@ function runMigrations() {
     }
     console.log('[DB] All migrations complete.');
 }
-/**
- * No-op in production — the client's database starts empty.
- * Seed data was used during development only.
- */
-function seedIfEmpty() {
-    // Production databases start empty — no test data inserted.
-}
+// NOTE: there is deliberately no seeding function here. Databases start empty
+// and are only ever filled by the operator, by a backup import, or by a cloud
+// restore. Records must never appear on their own.
 exports.default = db;

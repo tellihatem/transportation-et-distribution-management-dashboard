@@ -230,6 +230,17 @@ export async function importBackup(backup: any): Promise<{ imported: Record<stri
   });
 }
 
+/**
+ * Permanently deletes every business record, leaving an empty database.
+ * Irreversible — the caller must confirm with the user first.
+ */
+export async function resetAllData(): Promise<{ deleted: Record<string, number>; total: number }> {
+  return request('/backup/reset', {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
 // ──────────────────────────────────────────
 // Client Payments & Ledgers
 // ──────────────────────────────────────────

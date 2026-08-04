@@ -137,14 +137,22 @@ app.use((req, _res, next) => {
 console.log('\n[SERVER] 🚛 Logistics Financial Dashboard — Backend Server');
 console.log('[SERVER] ─────────────────────────────────────────────────');
 (0, database_1.runMigrations)();
-(0, database_1.seedIfEmpty)();
-// Health check (public, no auth — used for uptime monitoring)
+console.log(`[DB] Using database file: ${database_1.DATABASE_FILE}`);
+// Health check (public, no auth — used for uptime monitoring).
+// Reports the database file in use: if unexpected records ever show up, the
+// first question is which file is being read, and this answers it directly.
 app.get('/api/health', (_req, res) => {
+    const counts = {};
+    for (const table of ['client_trips', 'material_resales', 'expenses']) {
+        counts[table] = database_1.default.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c;
+    }
     res.json({
         success: true,
         service: 'logistics-dashboard-api',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
+        databaseFile: database_1.DATABASE_FILE,
+        recordCounts: counts,
     });
 });
 // --- API Routes ---

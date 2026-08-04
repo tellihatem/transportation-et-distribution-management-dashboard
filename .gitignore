@@ -13,6 +13,9 @@ release/*
 
 # Keep these files tracked
 !release/Logistics Financial Dashboard Setup 1.0.0.exe
+# Stray installer copies outside release/ — these go stale and get installed
+# from by mistake. The shippable installer only ever lives in release/.
+/*.exe
 !release/logistics-dashboard-1.0.0-x64.nsis.7z
 !build/icon.ico
 !build/installer.nsh
