@@ -19,6 +19,12 @@
  *
  *  Each section below matches one screen or area of the app, and the comments
  *  explain where the text appears so wording can match the actual feature.
+ *
+ *  ONE EXCEPTION
+ *    The Windows installer's own screens (setup and uninstall prompts) are
+ *    compiled by the installer tool, not bundled with the app, so their Arabic
+ *    lives in `build/installer.nsh` instead. It is a handful of lines, and it
+ *    is the only user-visible text outside this file.
  * ============================================================================
  */
 
@@ -444,6 +450,15 @@ export const T = {
     /** Danger button: wipes every record in the database. */
     resetData: "تفريغ قاعدة البيانات",
     resetDataTitle: "حذف جميع السجلات نهائياً من قاعدة البيانات",
+    /** Small badge showing which build of the app is running. The version
+     *  number is added after this word by the app, so this is just the word. */
+    versionLabel: "الإصدار",
+    /** Tooltip on that badge: the exact build number and the database file
+     *  currently in use. Shown on hover; \n starts a new line. */
+    versionTitle: (build: string, dbFile: string) =>
+      `رقم البناء: ${build}\nملف قاعدة البيانات: ${dbFile}`,
+    /** Shown in the badge while the app is still asking the server. */
+    versionLoading: "…",
   },
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -457,6 +472,8 @@ export const T = {
     body: "سيتم حذف كل الرحلات وعمليات البيع والمصاريف ودفعات العملاء والسائقين نهائياً. لا يمكن التراجع عن هذه العملية.",
     /** Advice to take a backup first. */
     backupHint: "ننصح بتصدير نسخة احتياطية قبل المتابعة.",
+    /** Precedes the full path of the database file about to be emptied. */
+    databaseFileLabel: "ملف قاعدة البيانات:",
     /** The operator must type this word to unlock the button. */
     confirmWord: "حذف",
     confirmPrompt: (word: string) => `اكتب كلمة «${word}» للتأكيد:`,

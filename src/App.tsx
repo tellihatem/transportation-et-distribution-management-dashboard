@@ -58,6 +58,7 @@ import { useResales } from "./hooks/useResales";
 import { useExpenses } from "./hooks/useExpenses";
 import { useClientPayments } from "./hooks/useClientPayments";
 import { useDriverPayments } from "./hooks/useDriverPayments";
+import { useAppInfo } from "./hooks/useAppInfo";
 import { ClientAccountsTab } from "./components/ClientAccountsTab";
 import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
@@ -123,6 +124,10 @@ export default function App() {
   const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
   const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, reload: reloadClientPayments } = useClientPayments(filters);
   const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, reload: reloadDriverPayments } = useDriverPayments(filters);
+
+  // Which build is running and which database file it opened — shown in the
+  // header badge and in the reset dialog.
+  const appInfo = useAppInfo();
 
   const refreshAllData = () => {
     reloadTrips();
@@ -901,6 +906,19 @@ export default function App() {
                   <h1 className="text-2xl font-black tracking-tight font-display bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
                     <span>{T.brand.companyName}</span>
                     <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full font-sans tracking-wide">{T.brand.safeModeBadge}</span>
+                    {/* Build identity. The single fastest way to tell whether a
+                        machine is running the current build — if this badge is
+                        missing entirely, it is an old install. */}
+                    <span
+                      title={appInfo ? T.header.versionTitle(appInfo.buildId, appInfo.databaseFile) : undefined}
+                      className="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2.5 py-0.5 rounded-full font-sans tracking-wide cursor-help"
+                    >
+                      {T.header.versionLabel}{" "}
+                      {/* dir="ltr" so "1.1.0" is not reordered by the RTL layout */}
+                      <span dir="ltr" className="font-mono">
+                        {appInfo ? appInfo.appVersion : T.header.versionLoading}
+                      </span>
+                    </span>
                   </h1>
                   <p className="text-xs text-slate-400 font-sans mt-0.5 flex items-center gap-1">
                     <Compass className="h-3.5 w-3.5 text-blue-500 shrink-0" />
@@ -1857,9 +1875,19 @@ export default function App() {
             </h3>
 
             <p className="text-xs text-slate-300 leading-relaxed mb-2">{T.reset.body}</p>
-            <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2 mb-4">
+            <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2 mb-3">
               {T.reset.backupHint}
             </p>
+
+            {/* Name the exact file about to be wiped. On a machine with more
+                than one Windows account there is more than one database, and
+                this is where knowing which one matters most. */}
+            {appInfo && (
+              <p className="text-[10px] text-slate-500 mb-4 break-all">
+                {T.reset.databaseFileLabel}{" "}
+                <span dir="ltr" className="font-mono text-slate-400">{appInfo.databaseFile}</span>
+              </p>
+            )}
 
             <label className="block text-xs text-slate-400 mb-1">
               {T.reset.confirmPrompt(T.reset.confirmWord)}

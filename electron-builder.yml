@@ -4,6 +4,12 @@ directories:
   output: release
   buildResources: build
 
+# No update server. electron-updater is not a dependency, but electron-builder
+# otherwise infers a GitHub provider from the git remote and emits a latest.yml
+# and resources/app-update.yml that nothing reads and that describe a filename
+# which does not exist. Explicitly off, so no misleading artifacts are produced.
+publish: null
+
 # Files to include in the asar archive
 files:
   - dist/**/*
@@ -37,8 +43,19 @@ win:
 nsis:
   oneClick: false
   perMachine: false
-  allowToChangeInstallationDirectory: true
+  # The version is in the filename so two builds can never be confused for one
+  # another. Previously every build produced the identical
+  # "Logistics Financial Dashboard Setup 1.0.0.exe", so a cloud link could
+  # serve a cached older copy with nobody able to tell. Spaces dropped because
+  # they survive links and email attachments badly.
+  artifactName: Logistics-Dashboard-Setup-${version}.${ext}
+  # Fixed install directory. A user-chosen path made a second, parallel
+  # install possible, and it also broke the installer's "is the app running?"
+  # check, which only looks at processes under the expected directory.
+  allowToChangeInstallationDirectory: false
   deleteAppDataOnUninstall: false
+  # No updater, so the .blockmap beside the installer is dead weight.
+  differentialPackage: false
 
 # Linux AppImage
 linux:

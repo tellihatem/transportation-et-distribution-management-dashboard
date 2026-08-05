@@ -16,6 +16,7 @@ import fs from 'fs';
 config({ path: path.resolve(process.cwd(), '.env') });
 
 import db, { runMigrations, DATABASE_FILE } from './database';
+import { APP_VERSION, BUILD_ID, BUILD_TIME, GIT_COMMIT } from './build-info';
 import { errorHandler } from './middleware/error-handler';
 import { processSyncQueue } from './sync/replicator';
 
@@ -110,12 +111,15 @@ app.use((req, _res, next) => {
 console.log('\n[SERVER] 🚛 Logistics Financial Dashboard — Backend Server');
 console.log('[SERVER] ─────────────────────────────────────────────────');
 
+console.log(`[SERVER] Version ${APP_VERSION} (build ${BUILD_ID})`);
 runMigrations();
 console.log(`[DB] Using database file: ${DATABASE_FILE}`);
 
 // Health check (public, no auth — used for uptime monitoring).
-// Reports the database file in use: if unexpected records ever show up, the
-// first question is which file is being read, and this answers it directly.
+//
+// Reports which build is running and which database file it opened. Both
+// questions used to be unanswerable on a machine we cannot inspect, which is
+// how a stale install kept showing records that had already been removed.
 app.get('/api/health', (_req, res) => {
   const counts: Record<string, number> = {};
   for (const table of ['client_trips', 'material_resales', 'expenses']) {
@@ -127,6 +131,10 @@ app.get('/api/health', (_req, res) => {
     service: 'logistics-dashboard-api',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    appVersion: APP_VERSION,
+    buildId: BUILD_ID,
+    buildTime: BUILD_TIME,
+    gitCommit: GIT_COMMIT,
     databaseFile: DATABASE_FILE,
     recordCounts: counts,
   });

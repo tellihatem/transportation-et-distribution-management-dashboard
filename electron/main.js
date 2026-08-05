@@ -87,6 +87,16 @@ async function startBackend() {
     process.env.DATABASE_PATH = path.join(app.getPath('userData'), 'logistics.db');
   }
 
+  // app.getVersion() is authoritative for what was actually installed, so it
+  // wins over the version baked into the bundle at build time.
+  process.env.APP_VERSION = app.getVersion();
+
+  // Logged on every start so a support question ("which build is this, and
+  // which database is it reading?") is answerable from the console alone.
+  console.log(`[MAIN] ${app.getName()} v${app.getVersion()} (packaged: ${app.isPackaged})`);
+  console.log(`[MAIN] userData: ${app.getPath('userData')}`);
+  console.log(`[MAIN] database: ${process.env.DATABASE_PATH}`);
+
   const { startServer } = await loadServerModule();
   if (typeof startServer !== 'function') {
     throw new Error('Compiled server module does not export startServer().');
@@ -113,11 +123,19 @@ async function createWindow() {
     width: 800,
     height: 600,
     show: false,
+    // Version in the title bar and taskbar hover, so the running build can be
+    // identified without opening anything. app.getName() is used rather than a
+    // literal because this file is outside the Vite bundle and cannot import
+    // src/strings.ts, where all other user-visible text lives.
+    title: `${app.getName()} v${app.getVersion()}`,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
     },
   });
+
+  // Without this the <title> in index.html immediately overwrites the above.
+  mainWindow.on('page-title-updated', (event) => event.preventDefault());
 
   mainWindow.maximize();
   await mainWindow.loadURL(`http://localhost:${port}`);
