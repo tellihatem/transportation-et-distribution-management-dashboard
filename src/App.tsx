@@ -210,11 +210,14 @@ export default function App() {
   const [resaleUnitPrice, setResaleUnitPrice] = useState<number>(0);
 
   // Keep the two in sync from either direction.
+  //
+  // These totals are money, so they are never rounded: a price per unit times
+  // a fractional quantity keeps its exact value all the way to the invoice.
   const setResaleSellingByUnit = (unitPrice: number) => {
     setResaleUnitPrice(unitPrice);
     setResaleForm(p => ({
       ...p,
-      clientSellingPrice: Math.round(unitPrice * (Number(p.totalTonnage) || 0)),
+      clientSellingPrice: unitPrice * (Number(p.totalTonnage) || 0),
     }));
   };
 
@@ -225,7 +228,7 @@ export default function App() {
       // Only re-derive the total when a unit price is actually in play,
       // so a manually typed total is never silently overwritten.
       clientSellingPrice: resaleUnitPrice > 0
-        ? Math.round(resaleUnitPrice * qty)
+        ? resaleUnitPrice * qty
         : p.clientSellingPrice,
     }));
   };
@@ -262,12 +265,12 @@ export default function App() {
   const computedFormTotalTrueProfit = resaleTripCount * (Number(resaleForm.explicitProfit) || 0) + tempHiddenMargin;
 
   // The per-trip price the CLIENT sees on the invoice: the transport share of
-  // the selling price divided by the trips. Flagged when it does not divide
-  // into whole dinars, so the operator can adjust the selling price and keep
-  // the printed invoice exact.
+  // the selling price divided by the trips. Money is never rounded, so when
+  // this does not come out in whole dinars there is no figure to show here or
+  // to print — the operator is told instead, and can adjust the selling price.
   const resaleClientTransport = (Number(resaleForm.clientSellingPrice) || 0) - tempSourcingCost;
-  const resaleClientPerTrip = Math.round(resaleClientTransport / resaleTripCount);
-  const resaleClientPerTripExact = resaleClientPerTrip * resaleTripCount === resaleClientTransport;
+  const resaleClientPerTripExact = resaleTripCount > 0 && resaleClientTransport % resaleTripCount === 0;
+  const resaleClientPerTrip = resaleClientTransport / resaleTripCount;
 
   // --- Financial Calculations (Global Dashboard Cards) ---
   // Filtered Client Transport records
@@ -850,13 +853,14 @@ export default function App() {
                 // across the trips, NOT the company's cost, so the margin
                 // stays private.
                 //
-                // Shown in whole dinars. When the split isn't exact the line
-                // total below stays the authoritative figure — the same
-                // rounding any invoice does on a unit price. The operator can
-                // always make it divide cleanly, because the form shows this
-                // same per-trip figure while the selling price is being set.
+                // Money is never rounded on an invoice. If the total does not
+                // divide into whole dinars there is no exact per-trip price to
+                // print, so none is printed — the line simply shows its total.
+                // The form flags this while the selling price is being entered,
+                // so the operator can make it divide and get the breakdown.
                 const factureTrips = Math.max(1, selectedReceipt.data.tripCount || 1);
-                const perTripPrice = Math.round(transportPrice / factureTrips).toLocaleString();
+                const perTripExact = transportPrice % factureTrips === 0;
+                const perTripPrice = (transportPrice / factureTrips).toLocaleString();
                 return (
                   <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
                     <div className="flex justify-between items-center text-sm">
@@ -865,9 +869,11 @@ export default function App() {
                     </div>
                     <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
                       <span className="text-slate-700">
-                        {factureTrips > 1
+                        {factureTrips > 1 && perTripExact
                           ? T.facture.deliveryPriceMultiTrip(factureTrips, perTripPrice)
-                          : T.facture.deliveryPriceLabel}
+                          : factureTrips > 1
+                            ? T.facture.deliveryPriceTripsOnly(factureTrips)
+                            : T.facture.deliveryPriceLabel}
                       </span>
                       <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} {T.common.currency}</span>
                     </div>
@@ -2287,9 +2293,12 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-slate-400 mb-1">{T.form.unitSellingPrice}</label>
+                        {/* Never rounded: when the total does not divide evenly
+                            by the quantity, the operator must see the real
+                            price per unit, not a tidied-up one. */}
                         <input
                           type="number"
-                          value={resaleUnitPrice ? Math.round(resaleUnitPrice) : ""}
+                          value={resaleUnitPrice || ""}
                           placeholder={T.form.unitSellingPricePlaceholder}
                           onChange={e => setResaleSellingByUnit(parseFloat(e.target.value) || 0)}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -2389,9 +2398,10 @@ export default function App() {
                           selling price nudged before anything is printed. */}
                       <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
                         <span>{T.form.clientPerTripLabel}</span>
-                        <strong className={resaleClientPerTripExact ? "text-cyan-300 font-mono" : "text-amber-400 font-mono"}>
-                          {resaleClientPerTrip.toLocaleString()} {T.common.currency}
-                          {!resaleClientPerTripExact && ` — ${T.form.perTripRounded}`}
+                        <strong className={resaleClientPerTripExact ? "text-cyan-300 font-mono" : "text-amber-400"}>
+                          {resaleClientPerTripExact
+                            ? `${resaleClientPerTrip.toLocaleString()} ${T.common.currency}`
+                            : T.form.perTripNotExact}
                         </strong>
                       </div>
                     </div>

@@ -717,8 +717,9 @@ export const T = {
     multiTripTotal: "إجمالي تكلفة النقل:",
     /** The per-trip price that will be printed on the client's invoice. */
     clientPerTripLabel: "سعر الرحلة للزبون (يظهر في الفاتورة):",
-    /** Warning shown when that price does not divide into whole dinars. */
-    perTripRounded: "مقرّب، عدّل سعر البيع ليقسم بالتساوي",
+    /** Shown instead of a price when the total does not divide evenly. No
+     *  rounded figure is displayed, and none is printed on the invoice. */
+    perTripNotExact: "لا ينقسم بالتساوي — لن يظهر سعر الرحلة في الفاتورة",
 
     /* --- Expense fields --- */
     expenseId: "رقم الفاتورة / المصرف",
@@ -756,6 +757,10 @@ export const T = {
      *  multiply back to the total shown. */
     deliveryPriceMultiTrip: (trips: number, perTrip: string) =>
       `سعر النقل والتوصيل (${trips} رحلات × ${perTrip} دج)`,
+    /** Used when the total does not divide into a whole price per trip. No
+     *  per-trip figure is printed, because there is no exact one and money is
+     *  never rounded on an invoice — only the number of trips is stated. */
+    deliveryPriceTripsOnly: (trips: number) => `سعر النقل والتوصيل (${trips} رحلات)`,
     /** Single price line on a plain transport invoice. */
     transportPriceLabel: "سعر النقل",
     grandTotalLabel: "المبلغ الإجمالي الواجب دفعه",
