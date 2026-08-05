@@ -77,6 +77,23 @@ function formatAlgerianDate(d: Date): string {
 // else can be typed in — these are just the common ones.
 const QUANTITY_UNITS = T.units.suggestions;
 
+// A resale's truck rent, driver wage and declared profit are all PER TRIP.
+// These two helpers keep every screen agreeing on how the trip count scales
+// them, rather than each one repeating the multiplication.
+function resaleTrips(tx: { tripCount?: number }): number {
+  return Math.max(1, tx.tripCount || 1);
+}
+
+function resaleTrueProfit(
+  tx: { tripCount?: number; truckCost: number; driverCost: number; explicitProfit: number; clientSellingPrice: number },
+  sourcingCost: number
+): number {
+  const trips = resaleTrips(tx);
+  const visibleTransportFee = trips * (tx.truckCost + tx.driverCost + tx.explicitProfit);
+  const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
+  return trips * tx.explicitProfit + hiddenMargin;
+}
+
 // Colored paid/remaining badge used in the trips and resales tables
 function PaymentBadge({ paid, total }: { paid: number; total: number }) {
   const remaining = total - paid;
@@ -184,8 +201,7 @@ export default function App() {
     driverCost: 5000,
     explicitProfit: 8000,
     driverName: "",
-    tripCount: 0,
-    tripUnitCost: 0,
+    tripCount: 1,
   });
 
   // Selling price per unit for the resale form. Form-only helper: the record
@@ -235,11 +251,15 @@ export default function App() {
   // Automatically compute Total Fee suggestion for Tab 1 as feedback in form
   const computedFormTotalTransportFee = (Number(tripForm.truckCost) || 0) + (Number(tripForm.driverCut) || 0) + (Number(tripForm.companyProfit) || 0);
 
-  // Automatically compute True Profit feedback in Tab 2 Form
+  // Automatically compute True Profit feedback in Tab 2 Form.
+  // The truck / driver / profit figures describe ONE trip, so the number of
+  // trips multiplies all three.
   const tempSourcingCost = (Number(resaleForm.factoryPurchasePrice) || 0) * (Number(resaleForm.totalTonnage) || 0);
-  const tempVisibleTransport = (Number(resaleForm.truckCost) || 0) + (Number(resaleForm.driverCost) || 0) + (Number(resaleForm.explicitProfit) || 0);
-  const tempHiddenMargin = (Number(resaleForm.clientSellingPrice) || 0) - (tempSourcingCost + tempVisibleTransport);
-  const computedFormTotalTrueProfit = (Number(resaleForm.explicitProfit) || 0) + tempHiddenMargin;
+  const resaleTripCount = Math.max(1, Number(resaleForm.tripCount) || 1);
+  const resalePerTripCost = (Number(resaleForm.truckCost) || 0) + (Number(resaleForm.driverCost) || 0) + (Number(resaleForm.explicitProfit) || 0);
+  const resaleTransportTotal = resaleTripCount * resalePerTripCost;
+  const tempHiddenMargin = (Number(resaleForm.clientSellingPrice) || 0) - (tempSourcingCost + resaleTransportTotal);
+  const computedFormTotalTrueProfit = resaleTripCount * (Number(resaleForm.explicitProfit) || 0) + tempHiddenMargin;
 
   // --- Financial Calculations (Global Dashboard Cards) ---
   // Filtered Client Transport records
@@ -332,16 +352,20 @@ export default function App() {
 
     filteredResaleTxs.forEach(tx => {
       const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
-      const visibleTransportFee = tx.truckCost + tx.driverCost + tx.explicitProfit;
+      // Costs are per trip, so a delivery split over several trips incurs
+      // each of them that many times — including the driver's wage.
+      const trips = Math.max(1, tx.tripCount || 1);
+      const visibleTransportFee = trips * (tx.truckCost + tx.driverCost + tx.explicitProfit);
       const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
-      const trueProfit = tx.explicitProfit + hiddenMargin;
+      const trueProfit = trips * tx.explicitProfit + hiddenMargin;
+      const driverWage = trips * tx.driverCost;
 
       tradingTurnover += tx.clientSellingPrice;
       capitalOutlay += sourcingCost;
       totalTrueProfit += trueProfit;
       totalTons += tx.totalTonnage;
       clientOutstanding += Math.max(0, tx.clientSellingPrice - (tx.clientPaid || 0));
-      driverOutstanding += Math.max(0, tx.driverCost - (tx.driverPaid || 0));
+      driverOutstanding += Math.max(0, driverWage - (tx.driverPaid || 0));
       clientCollected += (tx.clientPaid || 0);
       driverSettled += (tx.driverPaid || 0);
     });
@@ -443,8 +467,7 @@ export default function App() {
         driverCost: 5000,
         explicitProfit: 8000,
         driverName: "",
-        tripCount: 0,
-        tripUnitCost: 0,
+        tripCount: 1,
       });
       setResaleUnitPrice(180000 / 40);
     } else {
@@ -536,8 +559,7 @@ export default function App() {
           driverCost: Number(resaleForm.driverCost) || 0,
           explicitProfit: Number(resaleForm.explicitProfit) || 0,
           driverName: resaleForm.driverName || "",
-          tripCount: Number(resaleForm.tripCount) || 0,
-          tripUnitCost: Number(resaleForm.tripUnitCost) || 0,
+          tripCount: Math.max(1, Number(resaleForm.tripCount) || 1),
         };
 
         if (modalType === "add") {
@@ -658,7 +680,7 @@ export default function App() {
         name: tx.id,
         [T.charts.materialPurchaseCost]: sourcingCost,
         [T.charts.finalSellingPrice]: tx.clientSellingPrice,
-        [T.charts.actualTotalProfit]: tx.explicitProfit + (tx.clientSellingPrice - (sourcingCost + tx.truckCost + tx.driverCost + tx.explicitProfit))
+        [T.charts.actualTotalProfit]: resaleTrueProfit(tx, sourcingCost)
       };
     }).reverse();
   }, [filteredResaleTxs]);
@@ -824,8 +846,8 @@ export default function App() {
                     </div>
                     <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
                       <span className="text-slate-700">
-                        {(selectedReceipt.data.tripCount > 0 && selectedReceipt.data.tripUnitCost > 0)
-                          ? T.facture.deliveryPriceMultiTrip(selectedReceipt.data.tripCount, selectedReceipt.data.tripUnitCost.toLocaleString())
+                        {selectedReceipt.data.tripCount > 1
+                          ? T.facture.deliveryPriceMultiTrip(selectedReceipt.data.tripCount)
                           : T.facture.deliveryPriceLabel}
                       </span>
                       <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} {T.common.currency}</span>
@@ -1512,7 +1534,7 @@ export default function App() {
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
                     <span className="text-2xl font-black font-mono text-blue-400 block mt-1">
-                      {filteredResaleTxs.reduce((sum, tx) => sum + tx.truckCost + tx.driverCost + tx.explicitProfit, 0).toLocaleString()} {T.common.currency}
+                      {filteredResaleTxs.reduce((sum, tx) => sum + resaleTrips(tx) * (tx.truckCost + tx.driverCost + tx.explicitProfit), 0).toLocaleString()} {T.common.currency}
                     </span>
                     <span className="text-[10px] text-slate-500">{T.resale.kpiVisibleTransportHint}</span>
                   </div>
@@ -1620,7 +1642,7 @@ export default function App() {
                             ) : (
                               filteredResaleTxs.map(tx => {
                                 const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
-                                const visibleTransportFee = tx.truckCost + tx.driverCost + tx.explicitProfit;
+                                const visibleTransportFee = resaleTrips(tx) * (tx.truckCost + tx.driverCost + tx.explicitProfit);
                                 const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
                                 const totalTrueProfit = tx.explicitProfit + hiddenMargin;
 
@@ -2308,7 +2330,10 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Optional multi-trip breakdown */}
+                    {/* Trips. The per-trip price is not typed in: it is the
+                        logistics box above (truck + driver + profit), which
+                        describes one trip. Entering it by hand used to let the
+                        two disagree. */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
                       <span className="text-[10px] text-violet-400 font-bold block">{T.form.multiTripTitle}</span>
                       <div className="grid grid-cols-2 gap-2">
@@ -2316,31 +2341,27 @@ export default function App() {
                           <label className="block text-slate-500 mb-1">{T.form.tripCount}</label>
                           <input
                             type="number"
-                            min="0"
-                            value={resaleForm.tripCount || ""}
-                            placeholder="0"
-                            onChange={e => setResaleForm(p => ({ ...p, tripCount: parseInt(e.target.value) || 0 }))}
+                            min="1"
+                            step="1"
+                            required
+                            value={resaleForm.tripCount ?? 1}
+                            onChange={e => setResaleForm(p => ({ ...p, tripCount: Math.max(1, parseInt(e.target.value) || 1) }))}
                             className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
                           />
                         </div>
                         <div>
                           <label className="block text-slate-500 mb-1">{T.form.tripUnitCost}</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={resaleForm.tripUnitCost || ""}
-                            placeholder="0"
-                            onChange={e => setResaleForm(p => ({ ...p, tripUnitCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
-                          />
+                          <div className="w-full bg-slate-900/60 border border-slate-800 p-1 rounded text-violet-300 font-mono">
+                            {resalePerTripCost.toLocaleString()} {T.common.currency}
+                          </div>
                         </div>
                       </div>
-                      {(Number(resaleForm.tripCount) > 0 && Number(resaleForm.tripUnitCost) > 0) && (
-                        <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                          <span>{T.form.multiTripTotal}</span>
-                          <strong className="text-violet-400 font-mono">{(Number(resaleForm.tripCount) * Number(resaleForm.tripUnitCost)).toLocaleString()} {T.common.currency}</strong>
-                        </div>
-                      )}
+                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
+                        <span>{T.form.multiTripTotal}</span>
+                        <strong className="text-violet-400 font-mono">
+                          {resaleTripCount} × {resalePerTripCost.toLocaleString()} = {resaleTransportTotal.toLocaleString()} {T.common.currency}
+                        </strong>
+                      </div>
                     </div>
 
                     {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
@@ -2570,12 +2591,20 @@ export default function App() {
                         <span>{T.receiptPreview.driverWage}</span>
                         <span className="font-mono">{selectedReceipt.data.driverCost.toLocaleString()} {T.common.currency}</span>
                       </div>
-                      {(selectedReceipt.data.tripCount > 0 && selectedReceipt.data.tripUnitCost > 0) && (
-                        <div className="flex justify-between py-1 text-slate-600">
-                          <span>{T.receiptPreview.tripCountLabel}</span>
-                          <span className="font-mono">{selectedReceipt.data.tripCount} × {selectedReceipt.data.tripUnitCost.toLocaleString()} {T.common.currency} = {(selectedReceipt.data.tripCount * selectedReceipt.data.tripUnitCost).toLocaleString()} {T.common.currency}</span>
-                        </div>
-                      )}
+                      {/* Internal sheet, so the real per-trip arithmetic is
+                          shown here: trips x (truck + driver + profit). */}
+                      {(() => {
+                        const trips = Math.max(1, selectedReceipt.data.tripCount || 1);
+                        const perTrip = selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit;
+                        return (
+                          <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100 pt-2">
+                            <span>{T.receiptPreview.tripCountLabel}</span>
+                            <span className="font-mono">
+                              {trips} × {perTrip.toLocaleString()} {T.common.currency} = {(trips * perTrip).toLocaleString()} {T.common.currency}
+                            </span>
+                          </div>
+                        );
+                      })()}
                       <div className="flex justify-between py-1 text-slate-600">
                         <span>{T.receiptPreview.explicitTransportMargin}</span>
                         <span className="font-mono text-slate-700">+{selectedReceipt.data.explicitProfit.toLocaleString()} {T.common.currency}</span>

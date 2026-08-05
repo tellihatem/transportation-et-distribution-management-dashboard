@@ -708,10 +708,12 @@ export const T = {
     explicitMargin: "الهامش البارز",
     hiddenMarginLabel: "قيمة الربح الخفي:",
     trueProfitLabel: "إجمالي صافي الربح الحقيقي:",
-    /** Optional multi-trip box. */
-    multiTripTitle: "تعدد الرحلات (اختياري)",
-    tripCount: "عدد الرحلات",
-    tripUnitCost: "سعر الرحلة الواحدة (دج)",
+    /** Trips box. Every delivery is at least one trip; the box above gives
+     *  the cost of ONE trip, and this multiplies it. */
+    multiTripTitle: "عدد الرحلات",
+    tripCount: "عدد الرحلات (1 على الأقل)",
+    /** Not typed in — calculated from كراء الشاحنة + كلفة السائق + الهامش البارز. */
+    tripUnitCost: "سعر الرحلة الواحدة (محتسب)",
     multiTripTotal: "إجمالي تكلفة النقل:",
 
     /* --- Expense fields --- */
@@ -743,9 +745,12 @@ export const T = {
     goodsPriceLabel: (qty: number, unit: string, unitPrice: string) =>
       `ثمن البضاعة (${qty} ${unit} × ${unitPrice} دج)`,
     deliveryPriceLabel: "سعر النقل والتوصيل",
-    /** Same delivery line when the job was split over several trips. */
-    deliveryPriceMultiTrip: (trips: number, perTrip: string) =>
-      `سعر النقل والتوصيل (${trips} رحلات × ${perTrip} دج)`,
+    /** Same delivery line when the job took more than one trip. Only the
+     *  number of trips is stated: the amount on this line also carries the
+     *  company's margin, so a per-trip price printed here would neither add
+     *  up nor be something the client should see. */
+    deliveryPriceMultiTrip: (trips: number) =>
+      `سعر النقل والتوصيل (${trips} رحلات)`,
     /** Single price line on a plain transport invoice. */
     transportPriceLabel: "سعر النقل",
     grandTotalLabel: "المبلغ الإجمالي الواجب دفعه",

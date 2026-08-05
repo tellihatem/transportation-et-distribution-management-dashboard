@@ -84,14 +84,17 @@ export function ExecutiveOverviewTab({
 
     resales.forEach(r => {
       const sourcingCost = (r.factoryPurchasePrice || 0) * (r.totalTonnage || 0);
-      const visibleTransportFee = (r.truckCost || 0) + (r.driverCost || 0) + (r.explicitProfit || 0);
+      // Transport costs are per trip, so a delivery split over several trips
+      // incurs the truck rent, the driver's wage and the profit once each.
+      const trips = Math.max(1, r.tripCount || 1);
+      const visibleTransportFee = trips * ((r.truckCost || 0) + (r.driverCost || 0) + (r.explicitProfit || 0));
       const hiddenMargin = (r.clientSellingPrice || 0) - (sourcingCost + visibleTransportFee);
-      const trueProfit = (r.explicitProfit || 0) + hiddenMargin;
+      const trueProfit = trips * (r.explicitProfit || 0) + hiddenMargin;
 
       resaleInvoiced += (r.clientSellingPrice || 0);
       resaleSourcingCosts += sourcingCost;
-      resaleDriverWages += (r.driverCost || 0);
-      resaleLogisticsCosts += (r.truckCost || 0);
+      resaleDriverWages += trips * (r.driverCost || 0);
+      resaleLogisticsCosts += trips * (r.truckCost || 0);
       resaleTrueProfit += trueProfit;
       resaleTons += (r.totalTonnage || 0);
     });
