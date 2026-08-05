@@ -715,6 +715,10 @@ export const T = {
     /** Not typed in — calculated from كراء الشاحنة + كلفة السائق + الهامش البارز. */
     tripUnitCost: "سعر الرحلة الواحدة (محتسب)",
     multiTripTotal: "إجمالي تكلفة النقل:",
+    /** The per-trip price that will be printed on the client's invoice. */
+    clientPerTripLabel: "سعر الرحلة للزبون (يظهر في الفاتورة):",
+    /** Warning shown when that price does not divide into whole dinars. */
+    perTripRounded: "مقرّب، عدّل سعر البيع ليقسم بالتساوي",
 
     /* --- Expense fields --- */
     expenseId: "رقم الفاتورة / المصرف",
@@ -745,12 +749,13 @@ export const T = {
     goodsPriceLabel: (qty: number, unit: string, unitPrice: string) =>
       `ثمن البضاعة (${qty} ${unit} × ${unitPrice} دج)`,
     deliveryPriceLabel: "سعر النقل والتوصيل",
-    /** Same delivery line when the job took more than one trip. Only the
-     *  number of trips is stated: the amount on this line also carries the
-     *  company's margin, so a per-trip price printed here would neither add
-     *  up nor be something the client should see. */
-    deliveryPriceMultiTrip: (trips: number) =>
-      `سعر النقل والتوصيل (${trips} رحلات)`,
+    /** Same delivery line when the job took more than one trip, showing what
+     *  the client pays for each trip. That figure is this line's total divided
+     *  by the number of trips — it is the client's price per trip, not the
+     *  company's cost, so the margin stays private and the two numbers always
+     *  multiply back to the total shown. */
+    deliveryPriceMultiTrip: (trips: number, perTrip: string) =>
+      `سعر النقل والتوصيل (${trips} رحلات × ${perTrip} دج)`,
     /** Single price line on a plain transport invoice. */
     transportPriceLabel: "سعر النقل",
     grandTotalLabel: "المبلغ الإجمالي الواجب دفعه",

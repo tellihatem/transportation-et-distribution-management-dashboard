@@ -261,6 +261,14 @@ export default function App() {
   const tempHiddenMargin = (Number(resaleForm.clientSellingPrice) || 0) - (tempSourcingCost + resaleTransportTotal);
   const computedFormTotalTrueProfit = resaleTripCount * (Number(resaleForm.explicitProfit) || 0) + tempHiddenMargin;
 
+  // The per-trip price the CLIENT sees on the invoice: the transport share of
+  // the selling price divided by the trips. Flagged when it does not divide
+  // into whole dinars, so the operator can adjust the selling price and keep
+  // the printed invoice exact.
+  const resaleClientTransport = (Number(resaleForm.clientSellingPrice) || 0) - tempSourcingCost;
+  const resaleClientPerTrip = Math.round(resaleClientTransport / resaleTripCount);
+  const resaleClientPerTripExact = resaleClientPerTrip * resaleTripCount === resaleClientTransport;
+
   // --- Financial Calculations (Global Dashboard Cards) ---
   // Filtered Client Transport records
   const filteredClientTrips = useMemo(() => {
@@ -838,6 +846,17 @@ export default function App() {
                 const unit = selectedReceipt.data.quantityUnit || T.common.defaultUnit;
                 const productSubtotal = unitPrice * qty;
                 const transportPrice = factureTotal - productSubtotal;
+                // What the client pays per trip: this line's own total split
+                // across the trips, NOT the company's cost, so the margin
+                // stays private.
+                //
+                // Shown in whole dinars. When the split isn't exact the line
+                // total below stays the authoritative figure — the same
+                // rounding any invoice does on a unit price. The operator can
+                // always make it divide cleanly, because the form shows this
+                // same per-trip figure while the selling price is being set.
+                const factureTrips = Math.max(1, selectedReceipt.data.tripCount || 1);
+                const perTripPrice = Math.round(transportPrice / factureTrips).toLocaleString();
                 return (
                   <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
                     <div className="flex justify-between items-center text-sm">
@@ -846,8 +865,8 @@ export default function App() {
                     </div>
                     <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
                       <span className="text-slate-700">
-                        {selectedReceipt.data.tripCount > 1
-                          ? T.facture.deliveryPriceMultiTrip(selectedReceipt.data.tripCount)
+                        {factureTrips > 1
+                          ? T.facture.deliveryPriceMultiTrip(factureTrips, perTripPrice)
                           : T.facture.deliveryPriceLabel}
                       </span>
                       <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} {T.common.currency}</span>
@@ -2360,6 +2379,19 @@ export default function App() {
                         <span>{T.form.multiTripTotal}</span>
                         <strong className="text-violet-400 font-mono">
                           {resaleTripCount} × {resalePerTripCost.toLocaleString()} = {resaleTransportTotal.toLocaleString()} {T.common.currency}
+                        </strong>
+                      </div>
+
+                      {/* Preview of the figure the CLIENT will see on the
+                          invoice, which is the transport portion of the selling
+                          price split across the trips — not the cost above.
+                          Shown here so an uneven split can be spotted and the
+                          selling price nudged before anything is printed. */}
+                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
+                        <span>{T.form.clientPerTripLabel}</span>
+                        <strong className={resaleClientPerTripExact ? "text-cyan-300 font-mono" : "text-amber-400 font-mono"}>
+                          {resaleClientPerTrip.toLocaleString()} {T.common.currency}
+                          {!resaleClientPerTripExact && ` — ${T.form.perTripRounded}`}
                         </strong>
                       </div>
                     </div>
