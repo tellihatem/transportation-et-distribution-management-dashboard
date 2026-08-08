@@ -9,9 +9,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const fs_1 = __importDefault(require("fs"));
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
+const legacy_purge_1 = require("../legacy-purge");
 const router = (0, express_1.Router)();
 const BACKUP_VERSION = 2;
 // Order matters on import: parents before children, because the allocation
@@ -82,6 +84,9 @@ router.post('/reset', (0, error_handler_1.asyncHandler)(async (req, res) => {
         for (const table of [...TABLES].reverse()) {
             deleted[table] = database_1.default.prepare(`DELETE FROM ${table}`).run().changes;
         }
+        // Pending sync items carry full row payloads. Left in place they would
+        // replay the very rows this wipe just removed to Supabase afterwards.
+        deleted['sync_queue'] = database_1.default.prepare('DELETE FROM sync_queue').run().changes;
     });
     resetTransaction();
     // Reclaim the freed pages so the file on disk actually shrinks.
@@ -107,12 +112,20 @@ router.post('/import', (0, error_handler_1.asyncHandler)(async (req, res) => {
             throw (0, error_handler_1.createApiError)(`Invalid backup file: "${table}" must be an array`, 400, 'VALIDATION_ERROR');
         }
     }
+    // The imported rows are filtered through the legacy seed purge below. If
+    // that filter cannot run, a backup made on a polluted machine would land
+    // unfiltered — refuse up front rather than import dirty data.
+    if (!fs_1.default.existsSync((0, legacy_purge_1.purgeSqlFile)())) {
+        throw (0, error_handler_1.createApiError)('Import unavailable: the legacy-data filter is missing from this installation. Reinstall the application.', 500, 'PURGE_FILTER_MISSING');
+    }
     const counts = {};
     const importTransaction = database_1.default.transaction(() => {
         // Clear children before parents so FK constraints are never violated.
         for (const table of [...TABLES].reverse()) {
             database_1.default.prepare(`DELETE FROM ${table}`).run();
         }
+        // Drop pending sync payloads too — they describe the replaced dataset.
+        database_1.default.prepare('DELETE FROM sync_queue').run();
         // Insert parents before children (TABLES is ordered accordingly).
         for (const table of TABLES) {
             const rows = tables[table] || [];
@@ -130,6 +143,14 @@ router.post('/import', (0, error_handler_1.asyncHandler)(async (req, res) => {
         }
     });
     importTransaction();
+    // A backup exported from a machine that still carried the old demo records
+    // would smuggle them straight back into a clean database. Run the same
+    // purge that executes at every boot (migration 007) over the imported rows,
+    // and queue deletes so the Supabase mirror is cleaned too. The purge
+    // matches id AND name AND date, so genuine records are untouched, and
+    // deleting absent rows is a no-op.
+    (0, legacy_purge_1.purgeLegacySeedRows)(database_1.default);
+    (0, legacy_purge_1.queueCloudSeedDeletes)();
     // Queue every restored record for Supabase sync (no-op if cloud sync isn't
     // configured). Only the tables that have a Supabase mirror and a text `id`
     // are replicated; the allocation tables use autoincrement ids and are local.

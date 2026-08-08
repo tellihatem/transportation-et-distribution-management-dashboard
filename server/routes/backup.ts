@@ -5,9 +5,11 @@
  */
 
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
+import { purgeLegacySeedRows, purgeSqlFile, queueCloudSeedDeletes } from '../legacy-purge';
 
 const router = Router();
 
@@ -94,6 +96,9 @@ router.post('/reset', asyncHandler(async (req: Request, res: Response) => {
     for (const table of [...TABLES].reverse()) {
       deleted[table] = db.prepare(`DELETE FROM ${table}`).run().changes;
     }
+    // Pending sync items carry full row payloads. Left in place they would
+    // replay the very rows this wipe just removed to Supabase afterwards.
+    deleted['sync_queue'] = db.prepare('DELETE FROM sync_queue').run().changes;
   });
 
   resetTransaction();
@@ -132,6 +137,17 @@ router.post('/import', asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
+  // The imported rows are filtered through the legacy seed purge below. If
+  // that filter cannot run, a backup made on a polluted machine would land
+  // unfiltered — refuse up front rather than import dirty data.
+  if (!fs.existsSync(purgeSqlFile())) {
+    throw createApiError(
+      'Import unavailable: the legacy-data filter is missing from this installation. Reinstall the application.',
+      500,
+      'PURGE_FILTER_MISSING'
+    );
+  }
+
   const counts: Record<string, number> = {};
 
   const importTransaction = db.transaction(() => {
@@ -139,6 +155,8 @@ router.post('/import', asyncHandler(async (req: Request, res: Response) => {
     for (const table of [...TABLES].reverse()) {
       db.prepare(`DELETE FROM ${table}`).run();
     }
+    // Drop pending sync payloads too — they describe the replaced dataset.
+    db.prepare('DELETE FROM sync_queue').run();
 
     // Insert parents before children (TABLES is ordered accordingly).
     for (const table of TABLES) {
@@ -159,6 +177,15 @@ router.post('/import', asyncHandler(async (req: Request, res: Response) => {
   });
 
   importTransaction();
+
+  // A backup exported from a machine that still carried the old demo records
+  // would smuggle them straight back into a clean database. Run the same
+  // purge that executes at every boot (migration 007) over the imported rows,
+  // and queue deletes so the Supabase mirror is cleaned too. The purge
+  // matches id AND name AND date, so genuine records are untouched, and
+  // deleting absent rows is a no-op.
+  purgeLegacySeedRows(db);
+  queueCloudSeedDeletes();
 
   // Queue every restored record for Supabase sync (no-op if cloud sync isn't
   // configured). Only the tables that have a Supabase mirror and a text `id`

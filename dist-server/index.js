@@ -140,11 +140,26 @@ console.log('[SERVER] ───────────────────�
 console.log(`[SERVER] Version ${build_info_1.APP_VERSION} (build ${build_info_1.BUILD_ID})`);
 (0, database_1.runMigrations)();
 console.log(`[DB] Using database file: ${database_1.DATABASE_FILE}`);
+{
+    // Where this database came from, printed on every start. If unexpected
+    // records ever appear again, this log names the file, the build that
+    // created it, and any other database files sitting beside it.
+    const provenance = (0, database_1.getDbProvenance)();
+    console.log(`[DB] Created ${provenance.created_at} by v${provenance.created_by_version} (epoch ${provenance.epoch})`);
+    if (database_1.QUARANTINED_FILE) {
+        console.warn(`[DB] A pre-epoch database was moved aside this start: ${database_1.QUARANTINED_FILE}`);
+    }
+    const others = (0, database_1.listOtherDatabaseFiles)();
+    if (others.length) {
+        console.warn(`[DB] Other database files present (NOT read by this app): ${others.join(', ')}`);
+    }
+}
 // Health check (public, no auth — used for uptime monitoring).
 //
-// Reports which build is running and which database file it opened. Both
-// questions used to be unanswerable on a machine we cannot inspect, which is
-// how a stale install kept showing records that had already been removed.
+// Reports which build is running, which database file it opened, which build
+// CREATED that file, and any other database files on the machine. All of this
+// used to be unanswerable remotely, which is how a stale install kept showing
+// records that had already been removed from the code.
 app.get('/api/health', (_req, res) => {
     const counts = {};
     for (const table of ['client_trips', 'material_resales', 'expenses']) {
@@ -160,6 +175,8 @@ app.get('/api/health', (_req, res) => {
         buildTime: build_info_1.BUILD_TIME,
         gitCommit: build_info_1.GIT_COMMIT,
         databaseFile: database_1.DATABASE_FILE,
+        databaseProvenance: (0, database_1.getDbProvenance)(),
+        otherDatabaseFiles: (0, database_1.listOtherDatabaseFiles)(),
         recordCounts: counts,
     });
 });

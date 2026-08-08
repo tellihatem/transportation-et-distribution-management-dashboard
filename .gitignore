@@ -27,5 +27,7 @@ dist-server/build-info.json
 !build/icon.ico
 !build/installer.nsh
 .claude
-data/*.db-shm
-data/*.db-wal
+# The local database is runtime state, never source. It was tracked once,
+# which meant every dev boot dirtied the tree and a git checkout could
+# resurrect a pre-epoch binary blob.
+data/

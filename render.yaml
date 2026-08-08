@@ -15,8 +15,13 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # logistics.v2.db, matching the desktop build. The app quarantines any
+      # database created by a pre-epoch build (renames it aside and starts
+      # fresh) — on the free tier the disk is ephemeral anyway, but if this is
+      # ever deployed on a persistent disk that held data from an old build,
+      # expect exactly that one-time fresh start.
       - key: DATABASE_PATH
-        value: ./data/logistics.db
+        value: ./data/logistics.v2.db
       - key: APP_PASSWORD
         sync: false # set the client's login password in the Render dashboard
       - key: SESSION_SECRET

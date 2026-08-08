@@ -13,6 +13,21 @@ let mainWindow = null;
 let serverModule = null;
 let isQuitting = false;
 
+// One instance only. Two copies racing the same database file could
+// interleave the quarantine/create/stamp sequence in database.ts, and the
+// loser would sit on a locked file. A second launch just focuses the first.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 // --- Resolve .env for packaged vs development ---
 function loadEnvConfig() {
   const isPackaged = app.isPackaged;
@@ -84,7 +99,16 @@ async function loadServerModule() {
 
 async function startBackend() {
   if (!process.env.DATABASE_PATH) {
-    process.env.DATABASE_PATH = path.join(app.getPath('userData'), 'logistics.db');
+    // logistics.v2.db — deliberately NOT the historical logistics.db.
+    //
+    // Builds before August 2026 re-seeded demo records into any empty
+    // logistics.db at startup, so as long as an old executable might launch
+    // on a machine, that filename can never be trusted again. This build uses
+    // a filename no old binary knows, so old code cannot write into it, and
+    // server/database.ts refuses to open any file that lacks the provenance
+    // stamp of the current DB_EPOCH. The old logistics.db, if present, is
+    // left untouched as an archive.
+    process.env.DATABASE_PATH = path.join(app.getPath('userData'), 'logistics.v2.db');
   }
 
   // app.getVersion() is authoritative for what was actually installed, so it
@@ -162,14 +186,20 @@ async function quitApp() {
 }
 
 app.whenReady().then(async () => {
+  if (!hasInstanceLock) return; // second instance — quitting
+
   try {
     await createWindow();
   } catch (error) {
     console.error('Failed to start local server:', error);
-    if (mainWindow) {
-      await mainWindow.loadFile(errorPage).catch(() => {});
-      mainWindow.show();
+    // The backend starts BEFORE the window is created, so a database error
+    // means no window exists yet — without this the app would keep running
+    // invisibly with nothing on screen and no way to see what went wrong.
+    if (!mainWindow) {
+      mainWindow = new BrowserWindow({ width: 700, height: 500, show: false });
     }
+    await mainWindow.loadFile(errorPage).catch(() => {});
+    mainWindow.show();
   }
 
   app.on('activate', async () => {
