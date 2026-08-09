@@ -30,7 +30,7 @@ const TABLES = [
 ];
 const COLUMNS_BY_TABLE = {
     client_trips: ['id', 'date', 'client_name', 'origin_factory', 'destination', 'material_type', 'total_tonnage', 'quantity_unit', 'truck_cost', 'driver_cut', 'company_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
-    material_resales: ['id', 'date', 'end_client', 'destination', 'material_type', 'origin_factory', 'factory_purchase_price', 'total_tonnage', 'quantity_unit', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'driver_name', 'trip_count', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
+    material_resales: ['id', 'date', 'end_client', 'destination', 'material_type', 'origin_factory', 'factory_purchase_price', 'product_unit_price', 'total_tonnage', 'quantity_unit', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'driver_name', 'trip_count', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
     expenses: ['id', 'date', 'category', 'truck_plate', 'amount', 'status', 'created_at', 'updated_at'],
     client_payments: ['id', 'date', 'client_name', 'amount', 'payment_method', 'notes', 'created_at', 'updated_at'],
     client_payment_allocations: ['payment_id', 'trip_type', 'trip_id', 'amount', 'created_at'],
@@ -45,6 +45,7 @@ const COLUMN_FALLBACKS = {
     origin_factory: '',
     quantity_unit: 'طن',
     // Every resale involves at least one trip; older backups predate the column.
+    product_unit_price: 0,
     trip_count: 1,
     client_paid: 0,
     driver_paid: 0,

@@ -31,10 +31,14 @@ export interface MaterialResaleTx {
   destination: string; // Delivery location for the resold materials
   materialType: string; // What is being shipped
   originFactory: string; // Where the materials come from
-  factoryPurchasePrice: number; // Purchase price per unit
+  factoryPurchasePrice: number; // Purchase price per unit (what we pay)
+  productUnitPrice: number;     // Selling price per unit (what the client pays)
   totalTonnage: number;
   quantityUnit: string;  // Unit the quantity is measured in (طن، وحدة، متر مكعب…)
-  clientSellingPrice: number; // Total combo price sold to customer (Material + Delivery)
+  // Invoice total billed to the client. DERIVED, not typed:
+  //   productUnitPrice × totalTonnage  +  tripCount × (truckCost + driverCost + explicitProfit)
+  // Kept as a stored field because the payment ledgers settle against it.
+  clientSellingPrice: number;
   truckCost: number;     // Truck logistics cost
   driverCost: number;    // Driver payment
   explicitProfit: number; // Declared profit for transport
@@ -45,11 +49,15 @@ export interface MaterialResaleTx {
   // Read-only: recomputed server-side from the payment ledgers. Never sent by forms.
   clientPaid: number;    // Amount the client has paid so far (toward clientSellingPrice)
   driverPaid: number;    // Amount paid to the driver so far (toward driverCost)
-  // Computed fields:
-  // - Sourcing Cost = factoryPurchasePrice * totalTonnage
-  // - Visible Transport Fee = truckCost + driverCost + explicitProfit
-  // - Hidden Margin Fee = clientSellingPrice - (Sourcing Cost + Visible Transport Fee)
-  // - Total True Profit = explicitProfit + Hidden Margin Fee
+  // Computed fields (see src/resale-math.ts — one implementation, shared):
+  // - Total Buy Cost       = factoryPurchasePrice * totalTonnage
+  // - Total Sell Revenue   = productUnitPrice     * totalTonnage
+  // - Gross Product Profit = Total Sell Revenue - Total Buy Cost
+  // - Cost Per Trip        = truckCost + driverCost + explicitProfit
+  // - Transport Total      = tripCount * Cost Per Trip
+  // - Hidden Profit        = Gross Product Profit - Transport Total
+  // - Net Real Profit      = Hidden Profit + tripCount * explicitProfit
+  // - Invoice Total        = Total Sell Revenue + Transport Total
 }
 
 /**
@@ -61,7 +69,16 @@ export interface MaterialResaleTx {
  * Letting a form submit them would silently wipe recorded payments on edit.
  */
 export type ClientTransportTripInput = Omit<ClientTransportTrip, 'clientPaid' | 'driverPaid'>;
-export type MaterialResaleTxInput = Omit<MaterialResaleTx, 'clientPaid' | 'driverPaid'>;
+
+/**
+ * clientSellingPrice is excluded as well: the invoice total is computed
+ * server-side from the goods and transport figures, so a form can no longer
+ * submit a total that disagrees with the lines printed on the invoice.
+ */
+export type MaterialResaleTxInput = Omit<
+  MaterialResaleTx,
+  'clientPaid' | 'driverPaid' | 'clientSellingPrice'
+>;
 
 // Tab 3: Other Expense Record
 export interface OtherExpense {
