@@ -36,6 +36,7 @@ import {
   Line
 } from 'recharts';
 import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary } from '../types';
+import { T } from '../strings';
 
 interface ExecutiveOverviewTabProps {
   trips: ClientTransportTrip[];
@@ -83,14 +84,17 @@ export function ExecutiveOverviewTab({
 
     resales.forEach(r => {
       const sourcingCost = (r.factoryPurchasePrice || 0) * (r.totalTonnage || 0);
-      const visibleTransportFee = (r.truckCost || 0) + (r.driverCost || 0) + (r.explicitProfit || 0);
+      // Transport costs are per trip, so a delivery split over several trips
+      // incurs the truck rent, the driver's wage and the profit once each.
+      const trips = Math.max(1, r.tripCount || 1);
+      const visibleTransportFee = trips * ((r.truckCost || 0) + (r.driverCost || 0) + (r.explicitProfit || 0));
       const hiddenMargin = (r.clientSellingPrice || 0) - (sourcingCost + visibleTransportFee);
-      const trueProfit = (r.explicitProfit || 0) + hiddenMargin;
+      const trueProfit = trips * (r.explicitProfit || 0) + hiddenMargin;
 
       resaleInvoiced += (r.clientSellingPrice || 0);
       resaleSourcingCosts += sourcingCost;
-      resaleDriverWages += (r.driverCost || 0);
-      resaleLogisticsCosts += (r.truckCost || 0);
+      resaleDriverWages += trips * (r.driverCost || 0);
+      resaleLogisticsCosts += trips * (r.truckCost || 0);
       resaleTrueProfit += trueProfit;
       resaleTons += (r.totalTonnage || 0);
     });
@@ -147,12 +151,12 @@ export function ExecutiveOverviewTab({
   // Chart data: Monthly Cashflow comparison
   const cashflowChartData = useMemo(() => {
     return [
-      { name: 'إجمالي المفتور', value: metrics.grossInvoicedTurnover, fill: '#3b82f6' },
-      { name: 'المحصل نقداً', value: metrics.clientCashCollected, fill: '#10b981' },
-      { name: 'ديون العملاء', value: metrics.clientOutstandingReceivable, fill: '#f59e0b' },
-      { name: 'مدفوعات السائقين', value: metrics.driverPayoutsGiven, fill: '#06b6d4' },
-      { name: 'مصاريف تشغيلية', value: metrics.totalOperationalBurdens, fill: '#ef4444' },
-      { name: 'صافي الربح الفعلي', value: metrics.netOperatingProfit, fill: '#8b5cf6' },
+      { name: T.overview.chartBars.invoiced, value: metrics.grossInvoicedTurnover, fill: '#3b82f6' },
+      { name: T.overview.chartBars.collected, value: metrics.clientCashCollected, fill: '#10b981' },
+      { name: T.overview.chartBars.clientDebts, value: metrics.clientOutstandingReceivable, fill: '#f59e0b' },
+      { name: T.overview.chartBars.driverPayouts, value: metrics.driverPayoutsGiven, fill: '#06b6d4' },
+      { name: T.overview.chartBars.operatingCosts, value: metrics.totalOperationalBurdens, fill: '#ef4444' },
+      { name: T.overview.chartBars.netProfit, value: metrics.netOperatingProfit, fill: '#8b5cf6' },
     ];
   }, [metrics]);
 
@@ -164,29 +168,29 @@ export function ExecutiveOverviewTab({
         {/* Card 1: Gross Invoiced & Cash Received */}
         <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-5 shadow-lg relative overflow-hidden">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold mb-2">
-            <span>رقم الأعمال المفوتر</span>
+            <span>{T.overview.invoicedTurnover}</span>
             <DollarSign className="w-5 h-5 text-blue-400" />
           </div>
           <div className="text-3xl font-extrabold text-slate-100 font-mono">
-            {metrics.grossInvoicedTurnover.toLocaleString()} <span className="text-sm font-normal text-slate-400">دج</span>
+            {metrics.grossInvoicedTurnover.toLocaleString()} <span className="text-sm font-normal text-slate-400">{T.common.currency}</span>
           </div>
           <div className="mt-3 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs">
-            <span className="text-slate-400">المحصل نقداً:</span>
-            <span className="font-bold text-emerald-400 font-mono">{metrics.clientCashCollected.toLocaleString()} دج</span>
+            <span className="text-slate-400">{T.overview.cashCollectedLabel}</span>
+            <span className="font-bold text-emerald-400 font-mono">{metrics.clientCashCollected.toLocaleString()} {T.common.currency}</span>
           </div>
         </div>
 
         {/* Card 2: Net Operating Profit */}
         <div className="bg-gradient-to-br from-emerald-950/60 to-slate-900 border border-emerald-800/60 rounded-2xl p-5 shadow-lg relative overflow-hidden">
           <div className="flex items-center justify-between text-emerald-400 text-xs font-semibold mb-2">
-            <span>صافي أرباح الشركة الفعلي</span>
+            <span>{T.overview.netProfit}</span>
             <TrendingUp className="w-5 h-5 text-emerald-400" />
           </div>
           <div className="text-3xl font-extrabold text-emerald-300 font-mono">
-            {metrics.netOperatingProfit.toLocaleString()} <span className="text-sm font-normal text-emerald-500">دج</span>
+            {metrics.netOperatingProfit.toLocaleString()} <span className="text-sm font-normal text-emerald-500">{T.common.currency}</span>
           </div>
           <div className="mt-3 pt-3 border-t border-emerald-900/60 flex items-center justify-between text-xs">
-            <span className="text-emerald-400/80">هامش الربح الصافي:</span>
+            <span className="text-emerald-400/80">{T.overview.netMarginLabel}</span>
             <span className="font-bold text-emerald-300 font-mono">{metrics.netProfitMarginPercent.toFixed(1)}%</span>
           </div>
         </div>
@@ -194,30 +198,30 @@ export function ExecutiveOverviewTab({
         {/* Card 3: Client Receivables (Outstanding Debt) */}
         <div className="bg-slate-800/80 border border-amber-900/50 rounded-2xl p-5 shadow-lg relative overflow-hidden">
           <div className="flex items-center justify-between text-amber-400 text-xs font-semibold mb-2">
-            <span>مستحقات عند العملاء (ديون)</span>
+            <span>{T.overview.clientReceivables}</span>
             <AlertCircle className="w-5 h-5 text-amber-400" />
           </div>
           <div className="text-3xl font-extrabold text-amber-300 font-mono">
-            {metrics.clientOutstandingReceivable.toLocaleString()} <span className="text-sm font-normal text-amber-500">دج</span>
+            {metrics.clientOutstandingReceivable.toLocaleString()} <span className="text-sm font-normal text-amber-500">{T.common.currency}</span>
           </div>
           <div className="mt-3 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs">
-            <span className="text-slate-400">ودائع مسبقة (عربون):</span>
-            <span className="font-bold text-blue-400 font-mono">+{metrics.clientAdvanceCredit.toLocaleString()} دج</span>
+            <span className="text-slate-400">{T.overview.clientAdvanceLabel}</span>
+            <span className="font-bold text-blue-400 font-mono">+{metrics.clientAdvanceCredit.toLocaleString()} {T.common.currency}</span>
           </div>
         </div>
 
         {/* Card 4: Driver Payables */}
         <div className="bg-slate-800/80 border border-cyan-900/50 rounded-2xl p-5 shadow-lg relative overflow-hidden">
           <div className="flex items-center justify-between text-cyan-400 text-xs font-semibold mb-2">
-            <span>مستحقات السائقين الواجبة</span>
+            <span>{T.overview.driverPayables}</span>
             <Truck className="w-5 h-5 text-cyan-400" />
           </div>
           <div className="text-3xl font-extrabold text-cyan-300 font-mono">
-            {metrics.driverOutstandingPayable.toLocaleString()} <span className="text-sm font-normal text-cyan-500">دج</span>
+            {metrics.driverOutstandingPayable.toLocaleString()} <span className="text-sm font-normal text-cyan-500">{T.common.currency}</span>
           </div>
           <div className="mt-3 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs">
-            <span className="text-slate-400">سلف السائقين:</span>
-            <span className="font-bold text-purple-400 font-mono">+{metrics.driverAdvances.toLocaleString()} دج</span>
+            <span className="text-slate-400">{T.overview.driverAdvancesLabel}</span>
+            <span className="font-bold text-purple-400 font-mono">+{metrics.driverAdvances.toLocaleString()} {T.common.currency}</span>
           </div>
         </div>
 
@@ -230,7 +234,7 @@ export function ExecutiveOverviewTab({
         <div className="lg:col-span-2 bg-slate-800/70 border border-slate-700/60 rounded-2xl p-5 shadow-xl">
           <h3 className="text-base font-bold text-slate-100 mb-4 flex items-center gap-2">
             <Compass className="w-5 h-5 text-emerald-400" />
-            مقارنة المؤشرات المالية والسيولة النقدية (دج)
+            {T.overview.chartTitle}
           </h3>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -240,7 +244,7 @@ export function ExecutiveOverviewTab({
                 <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#f8fafc' }}
-                  formatter={(value: any) => [`${Number(value).toLocaleString()} دج`, 'المبلغ']}
+                  formatter={(value: any) => [`${Number(value).toLocaleString()} ${T.common.currency}`, T.overview.chartAmountLabel]}
                 />
                 <Bar dataKey="value" radius={[8, 8, 0, 0]}>
                   {cashflowChartData.map((entry, index) => (
@@ -257,10 +261,10 @@ export function ExecutiveOverviewTab({
           <div>
             <h3 className="text-base font-bold text-slate-100 mb-2 flex items-center gap-2">
               <Briefcase className="w-5 h-5 text-cyan-400" />
-              الوصول السريع لمهام الإدارة
+              {T.overview.quickLinksTitle}
             </h3>
             <p className="text-xs text-slate-400 mb-4">
-              الانتقال الفوري إلى التبويبات المتخصصة لإدارة العمليات والدفعات.
+              {T.overview.quickLinksSubtitle}
             </p>
 
             <div className="space-y-2.5">
@@ -270,7 +274,7 @@ export function ExecutiveOverviewTab({
               >
                 <span className="flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-emerald-400" />
-                  تسجيل دفعات وتصفية حسابات العملاء
+                  {T.overview.quickLinkClients}
                 </span>
                 <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-colors" />
               </button>
@@ -281,7 +285,7 @@ export function ExecutiveOverviewTab({
               >
                 <span className="flex items-center gap-2">
                   <Truck className="w-4 h-4 text-cyan-400" />
-                  تصفية أجور ومستحقات السائقين
+                  {T.overview.quickLinkDrivers}
                 </span>
                 <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition-colors" />
               </button>
@@ -292,7 +296,7 @@ export function ExecutiveOverviewTab({
               >
                 <span className="flex items-center gap-2">
                   <Layers className="w-4 h-4 text-amber-400" />
-                  سجل رحلات نقل العملاء ({trips.length})
+                  {T.overview.quickLinkTrips(trips.length)}
                 </span>
                 <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-slate-200 transition-colors" />
               </button>
@@ -303,7 +307,7 @@ export function ExecutiveOverviewTab({
               >
                 <span className="flex items-center gap-2">
                   <PiggyBank className="w-4 h-4 text-purple-400" />
-                  سجل عمليات بيع المواد ({resales.length})
+                  {T.overview.quickLinkResales(resales.length)}
                 </span>
                 <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-slate-200 transition-colors" />
               </button>
@@ -314,7 +318,7 @@ export function ExecutiveOverviewTab({
               >
                 <span className="flex items-center gap-2">
                   <TrendingDown className="w-4 h-4 text-rose-400" />
-                  سجل الأعباء والمصاريف الأخرى ({expenses.length})
+                  {T.overview.quickLinkExpenses(expenses.length)}
                 </span>
                 <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-slate-200 transition-colors" />
               </button>

@@ -9,13 +9,25 @@ coverage/
 certs/
 .electron-dist-cache/
 
+# Build output. Installers are NOT tracked: they were previously committed
+# through Git LFS, so a plain clone or "Download ZIP" handed out a 130-byte
+# pointer instead of an installer, silently. Ship the artifact from release/
+# by hand (see docs/BUILD_AND_SIGN.md) — never through the repo.
 release/*
 
+# Stray installer copies outside release/ — these go stale and get installed
+# from by mistake. The shippable installer only ever lives in release/.
+/*.exe
+
+# Generated at build time by scripts/write-dist-server-package.cjs.
+# dist-server/ is tracked, so this needs an explicit rule.
+dist-server/build-info.json
+
 # Keep these files tracked
-!release/Logistics Financial Dashboard Setup 1.0.0.exe
-!release/logistics-dashboard-1.0.0-x64.nsis.7z
 !build/icon.ico
 !build/installer.nsh
 .claude
-data/*.db-shm
-data/*.db-wal
+# The local database is runtime state, never source. It was tracked once,
+# which meant every dev boot dirtied the tree and a git checkout could
+# resurrect a pre-epoch binary blob.
+data/

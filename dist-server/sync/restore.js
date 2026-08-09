@@ -10,6 +10,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.restoreFromSupabase = restoreFromSupabase;
 const database_1 = __importDefault(require("../database"));
 const supabase_client_1 = require("./supabase-client");
+const legacy_purge_1 = require("../legacy-purge");
 /**
  * Full restore: Pull all data from Supabase and replace local database content.
  * Runs inside a transaction for atomicity.
@@ -95,16 +96,28 @@ async function restoreFromSupabase() {
             }
         });
         restoreTransaction();
+        // Seed-era builds pushed their demo rows to Supabase, and nothing on the
+        // mirror was ever cleaned — so a cloud restore is a reinfection path
+        // unless the same purge that runs at boot runs here too. Queue mirror
+        // deletes as well, so the source itself stops carrying the rows.
+        (0, legacy_purge_1.purgeLegacySeedRows)(database_1.default);
+        (0, legacy_purge_1.queueCloudSeedDeletes)();
+        // Report what actually remains after the purge, not what was fetched —
+        // the two differ exactly when the mirror was polluted.
+        const kept = {
+            client_trips: database_1.default.prepare('SELECT COUNT(*) c FROM client_trips').get().c,
+            material_resales: database_1.default.prepare('SELECT COUNT(*) c FROM material_resales').get().c,
+            expenses: database_1.default.prepare('SELECT COUNT(*) c FROM expenses').get().c,
+        };
+        const fetched = trips.length + resales.length + expenses.length;
+        const purged = fetched - (kept.client_trips + kept.material_resales + kept.expenses);
         const result = {
             success: true,
-            tables: {
-                client_trips: trips.length,
-                material_resales: resales.length,
-                expenses: expenses.length,
-            },
-            totalRecords: trips.length + resales.length + expenses.length,
+            tables: kept,
+            totalRecords: kept.client_trips + kept.material_resales + kept.expenses,
         };
-        console.log(`[RESTORE] ✅ Restored ${result.totalRecords} total records from Supabase`);
+        console.log(`[RESTORE] ✅ Restored ${result.totalRecords} record(s) from Supabase` +
+            (purged > 0 ? ` (${purged} legacy seed row(s) filtered out and queued for cloud deletion)` : ''));
         return result;
     }
     catch (error) {

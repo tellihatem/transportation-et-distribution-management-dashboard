@@ -5,6 +5,7 @@
 
 import db from '../database';
 import { getSupabaseClient } from './supabase-client';
+import { purgeLegacySeedRows, queueCloudSeedDeletes } from '../legacy-purge';
 
 interface RestoreResult {
   success: boolean;
@@ -130,17 +131,31 @@ export async function restoreFromSupabase(): Promise<RestoreResult> {
 
     restoreTransaction();
 
+    // Seed-era builds pushed their demo rows to Supabase, and nothing on the
+    // mirror was ever cleaned — so a cloud restore is a reinfection path
+    // unless the same purge that runs at boot runs here too. Queue mirror
+    // deletes as well, so the source itself stops carrying the rows.
+    purgeLegacySeedRows(db);
+    queueCloudSeedDeletes();
+
+    // Report what actually remains after the purge, not what was fetched —
+    // the two differ exactly when the mirror was polluted.
+    const kept = {
+      client_trips: (db.prepare('SELECT COUNT(*) c FROM client_trips').get() as any).c as number,
+      material_resales: (db.prepare('SELECT COUNT(*) c FROM material_resales').get() as any).c as number,
+      expenses: (db.prepare('SELECT COUNT(*) c FROM expenses').get() as any).c as number,
+    };
+    const fetched = trips.length + resales.length + expenses.length;
+    const purged = fetched - (kept.client_trips + kept.material_resales + kept.expenses);
+
     const result: RestoreResult = {
       success: true,
-      tables: {
-        client_trips: trips.length,
-        material_resales: resales.length,
-        expenses: expenses.length,
-      },
-      totalRecords: trips.length + resales.length + expenses.length,
+      tables: kept,
+      totalRecords: kept.client_trips + kept.material_resales + kept.expenses,
     };
 
-    console.log(`[RESTORE] ✅ Restored ${result.totalRecords} total records from Supabase`);
+    console.log(`[RESTORE] ✅ Restored ${result.totalRecords} record(s) from Supabase` +
+      (purged > 0 ? ` (${purged} legacy seed row(s) filtered out and queued for cloud deletion)` : ''));
     return result;
 
   } catch (error: any) {

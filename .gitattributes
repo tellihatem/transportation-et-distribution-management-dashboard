@@ -1,2 +1,6 @@
-*.7z filter=lfs diff=lfs merge=lfs -text
-release/*.exe filter=lfs diff=lfs merge=lfs -text
+# Installers are no longer tracked in this repo, so there are no LFS rules.
+#
+# They used to be, via Git LFS. That silently handed a 130-byte pointer file
+# to anyone cloning without git-lfs or using GitHub's "Download ZIP" — with no
+# error to indicate the download was not an installer. Build with
+# `npm run release:win` and ship the artifact from release/ directly.

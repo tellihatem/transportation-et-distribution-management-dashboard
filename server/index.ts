@@ -15,7 +15,8 @@ import fs from 'fs';
 // Load .env from project root
 config({ path: path.resolve(process.cwd(), '.env') });
 
-import db, { runMigrations, seedIfEmpty } from './database';
+import db, { runMigrations, DATABASE_FILE, QUARANTINED_FILE, getDbProvenance, listOtherDatabaseFiles } from './database';
+import { APP_VERSION, BUILD_ID, BUILD_TIME, GIT_COMMIT } from './build-info';
 import { errorHandler } from './middleware/error-handler';
 import { processSyncQueue } from './sync/replicator';
 
@@ -110,16 +111,49 @@ app.use((req, _res, next) => {
 console.log('\n[SERVER] 🚛 Logistics Financial Dashboard — Backend Server');
 console.log('[SERVER] ─────────────────────────────────────────────────');
 
+console.log(`[SERVER] Version ${APP_VERSION} (build ${BUILD_ID})`);
 runMigrations();
-seedIfEmpty();
+console.log(`[DB] Using database file: ${DATABASE_FILE}`);
+{
+  // Where this database came from, printed on every start. If unexpected
+  // records ever appear again, this log names the file, the build that
+  // created it, and any other database files sitting beside it.
+  const provenance = getDbProvenance();
+  console.log(`[DB] Created ${provenance.created_at} by v${provenance.created_by_version} (epoch ${provenance.epoch})`);
+  if (QUARANTINED_FILE) {
+    console.warn(`[DB] A pre-epoch database was moved aside this start: ${QUARANTINED_FILE}`);
+  }
+  const others = listOtherDatabaseFiles();
+  if (others.length) {
+    console.warn(`[DB] Other database files present (NOT read by this app): ${others.join(', ')}`);
+  }
+}
 
-// Health check (public, no auth — used for uptime monitoring)
+// Health check (public, no auth — used for uptime monitoring).
+//
+// Reports which build is running, which database file it opened, which build
+// CREATED that file, and any other database files on the machine. All of this
+// used to be unanswerable remotely, which is how a stale install kept showing
+// records that had already been removed from the code.
 app.get('/api/health', (_req, res) => {
+  const counts: Record<string, number> = {};
+  for (const table of ['client_trips', 'material_resales', 'expenses']) {
+    counts[table] = (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as any).c;
+  }
+
   res.json({
     success: true,
     service: 'logistics-dashboard-api',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    appVersion: APP_VERSION,
+    buildId: BUILD_ID,
+    buildTime: BUILD_TIME,
+    gitCommit: GIT_COMMIT,
+    databaseFile: DATABASE_FILE,
+    databaseProvenance: getDbProvenance(),
+    otherDatabaseFiles: listOtherDatabaseFiles(),
+    recordCounts: counts,
   });
 });
 

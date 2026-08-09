@@ -58,17 +58,16 @@ import { useResales } from "./hooks/useResales";
 import { useExpenses } from "./hooks/useExpenses";
 import { useClientPayments } from "./hooks/useClientPayments";
 import { useDriverPayments } from "./hooks/useDriverPayments";
+import { useAppInfo } from "./hooks/useAppInfo";
 import { ClientAccountsTab } from "./components/ClientAccountsTab";
 import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
-import { downloadBackup, importBackup, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
+import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
 import logoUrl from "../assets/canvas.png";
+import { T } from "./strings";
 
 // Algerian French-loanword month names, matching the receipt's existing date convention
-const ALGERIAN_MONTHS = [
-  "جانفي", "فيفري", "مارس", "أفريل", "ماي", "جوان",
-  "جويلية", "أوت", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
-];
+const ALGERIAN_MONTHS = T.calendar.months;
 
 function formatAlgerianDate(d: Date): string {
   return `${d.getDate()} ${ALGERIAN_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
@@ -76,18 +75,35 @@ function formatAlgerianDate(d: Date): string {
 
 // Suggested units for the quantity field. The input is free-text, so anything
 // else can be typed in — these are just the common ones.
-const QUANTITY_UNITS = ["طن", "قنطار", "كيلوغرام", "متر مكعب", "وحدة", "كيس", "لتر", "رحلة"];
+const QUANTITY_UNITS = T.units.suggestions;
+
+// A resale's truck rent, driver wage and declared profit are all PER TRIP.
+// These two helpers keep every screen agreeing on how the trip count scales
+// them, rather than each one repeating the multiplication.
+function resaleTrips(tx: { tripCount?: number }): number {
+  return Math.max(1, tx.tripCount || 1);
+}
+
+function resaleTrueProfit(
+  tx: { tripCount?: number; truckCost: number; driverCost: number; explicitProfit: number; clientSellingPrice: number },
+  sourcingCost: number
+): number {
+  const trips = resaleTrips(tx);
+  const visibleTransportFee = trips * (tx.truckCost + tx.driverCost + tx.explicitProfit);
+  const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
+  return trips * tx.explicitProfit + hiddenMargin;
+}
 
 // Colored paid/remaining badge used in the trips and resales tables
 function PaymentBadge({ paid, total }: { paid: number; total: number }) {
   const remaining = total - paid;
   return remaining <= 0 ? (
     <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900/30 text-emerald-400 border border-emerald-800/65">
-      مدفوع بالكامل
+      {T.badge.fullyPaid}
     </span>
   ) : (
     <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/40 text-amber-300 border border-amber-800">
-      متبقي: {remaining.toLocaleString()} دج
+      {T.badge.remaining} {remaining.toLocaleString()} {T.common.currency}
     </span>
   );
 }
@@ -126,6 +142,10 @@ export default function App() {
   const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, reload: reloadClientPayments } = useClientPayments(filters);
   const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, reload: reloadDriverPayments } = useDriverPayments(filters);
 
+  // Which build is running and which database file it opened — shown in the
+  // header badge and in the reset dialog.
+  const appInfo = useAppInfo();
+
   const refreshAllData = () => {
     reloadTrips();
     reloadResales();
@@ -158,7 +178,7 @@ export default function App() {
     destination: "",
     materialType: "",
     totalTonnage: 30,
-    quantityUnit: "طن",
+    quantityUnit: T.common.defaultUnit,
     truckCost: 15000,
     driverCut: 5000,
     companyProfit: 5000,
@@ -175,14 +195,13 @@ export default function App() {
     originFactory: "",
     factoryPurchasePrice: 1500,
     totalTonnage: 40,
-    quantityUnit: "طن",
+    quantityUnit: T.common.defaultUnit,
     clientSellingPrice: 150000,
     truckCost: 18000,
     driverCost: 5000,
     explicitProfit: 8000,
     driverName: "",
-    tripCount: 0,
-    tripUnitCost: 0,
+    tripCount: 1,
   });
 
   // Selling price per unit for the resale form. Form-only helper: the record
@@ -191,11 +210,14 @@ export default function App() {
   const [resaleUnitPrice, setResaleUnitPrice] = useState<number>(0);
 
   // Keep the two in sync from either direction.
+  //
+  // These totals are money, so they are never rounded: a price per unit times
+  // a fractional quantity keeps its exact value all the way to the invoice.
   const setResaleSellingByUnit = (unitPrice: number) => {
     setResaleUnitPrice(unitPrice);
     setResaleForm(p => ({
       ...p,
-      clientSellingPrice: Math.round(unitPrice * (Number(p.totalTonnage) || 0)),
+      clientSellingPrice: unitPrice * (Number(p.totalTonnage) || 0),
     }));
   };
 
@@ -206,7 +228,7 @@ export default function App() {
       // Only re-derive the total when a unit price is actually in play,
       // so a manually typed total is never silently overwritten.
       clientSellingPrice: resaleUnitPrice > 0
-        ? Math.round(resaleUnitPrice * qty)
+        ? resaleUnitPrice * qty
         : p.clientSellingPrice,
     }));
   };
@@ -232,11 +254,23 @@ export default function App() {
   // Automatically compute Total Fee suggestion for Tab 1 as feedback in form
   const computedFormTotalTransportFee = (Number(tripForm.truckCost) || 0) + (Number(tripForm.driverCut) || 0) + (Number(tripForm.companyProfit) || 0);
 
-  // Automatically compute True Profit feedback in Tab 2 Form
+  // Automatically compute True Profit feedback in Tab 2 Form.
+  // The truck / driver / profit figures describe ONE trip, so the number of
+  // trips multiplies all three.
   const tempSourcingCost = (Number(resaleForm.factoryPurchasePrice) || 0) * (Number(resaleForm.totalTonnage) || 0);
-  const tempVisibleTransport = (Number(resaleForm.truckCost) || 0) + (Number(resaleForm.driverCost) || 0) + (Number(resaleForm.explicitProfit) || 0);
-  const tempHiddenMargin = (Number(resaleForm.clientSellingPrice) || 0) - (tempSourcingCost + tempVisibleTransport);
-  const computedFormTotalTrueProfit = (Number(resaleForm.explicitProfit) || 0) + tempHiddenMargin;
+  const resaleTripCount = Math.max(1, Number(resaleForm.tripCount) || 1);
+  const resalePerTripCost = (Number(resaleForm.truckCost) || 0) + (Number(resaleForm.driverCost) || 0) + (Number(resaleForm.explicitProfit) || 0);
+  const resaleTransportTotal = resaleTripCount * resalePerTripCost;
+  const tempHiddenMargin = (Number(resaleForm.clientSellingPrice) || 0) - (tempSourcingCost + resaleTransportTotal);
+  const computedFormTotalTrueProfit = resaleTripCount * (Number(resaleForm.explicitProfit) || 0) + tempHiddenMargin;
+
+  // The per-trip price the CLIENT sees on the invoice: the transport share of
+  // the selling price divided by the trips. Money is never rounded, so when
+  // this does not come out in whole dinars there is no figure to show here or
+  // to print — the operator is told instead, and can adjust the selling price.
+  const resaleClientTransport = (Number(resaleForm.clientSellingPrice) || 0) - tempSourcingCost;
+  const resaleClientPerTripExact = resaleTripCount > 0 && resaleClientTransport % resaleTripCount === 0;
+  const resaleClientPerTrip = resaleClientTransport / resaleTripCount;
 
   // --- Financial Calculations (Global Dashboard Cards) ---
   // Filtered Client Transport records
@@ -329,16 +363,20 @@ export default function App() {
 
     filteredResaleTxs.forEach(tx => {
       const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
-      const visibleTransportFee = tx.truckCost + tx.driverCost + tx.explicitProfit;
+      // Costs are per trip, so a delivery split over several trips incurs
+      // each of them that many times — including the driver's wage.
+      const trips = Math.max(1, tx.tripCount || 1);
+      const visibleTransportFee = trips * (tx.truckCost + tx.driverCost + tx.explicitProfit);
       const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
-      const trueProfit = tx.explicitProfit + hiddenMargin;
+      const trueProfit = trips * tx.explicitProfit + hiddenMargin;
+      const driverWage = trips * tx.driverCost;
 
       tradingTurnover += tx.clientSellingPrice;
       capitalOutlay += sourcingCost;
       totalTrueProfit += trueProfit;
       totalTons += tx.totalTonnage;
       clientOutstanding += Math.max(0, tx.clientSellingPrice - (tx.clientPaid || 0));
-      driverOutstanding += Math.max(0, tx.driverCost - (tx.driverPaid || 0));
+      driverOutstanding += Math.max(0, driverWage - (tx.driverPaid || 0));
       clientCollected += (tx.clientPaid || 0);
       driverSettled += (tx.driverPaid || 0);
     });
@@ -417,7 +455,7 @@ export default function App() {
         destination: "",
         materialType: "",
         totalTonnage: 32,
-        quantityUnit: "طن",
+        quantityUnit: T.common.defaultUnit,
         truckCost: 15000,
         driverCut: 5000,
         companyProfit: 6000,
@@ -434,14 +472,13 @@ export default function App() {
         originFactory: "",
         factoryPurchasePrice: 1500,
         totalTonnage: 40,
-        quantityUnit: "طن",
+        quantityUnit: T.common.defaultUnit,
         clientSellingPrice: 180000,
         truckCost: 18000,
         driverCost: 5000,
         explicitProfit: 8000,
         driverName: "",
-        tripCount: 0,
-        tripUnitCost: 0,
+        tripCount: 1,
       });
       setResaleUnitPrice(180000 / 40);
     } else {
@@ -477,7 +514,7 @@ export default function App() {
   };
 
   const handleDelete = async (id: string, type?: "transport" | "resale" | "expenses") => {
-    if (!confirm("هل أنت متأكد من رغبتك في حذف هذا السجل بشكل نهائي؟")) return;
+    if (!confirm(T.dialogs.confirmDelete)) return;
     const targetType = type || (activeTab === "resale" ? "resale" : activeTab === "expenses" ? "expenses" : "transport");
     try {
       if (targetType === "transport") {
@@ -489,7 +526,7 @@ export default function App() {
       }
       refreshAllData();
     } catch (err: any) {
-      alert(`تعذر حذف السجل: ${err.message}`);
+      alert(T.dialogs.deleteFailed(err.message));
     }
   };
 
@@ -505,7 +542,7 @@ export default function App() {
           destination: tripForm.destination || "",
           materialType: tripForm.materialType || "",
           totalTonnage: Number(tripForm.totalTonnage) || 0,
-          quantityUnit: tripForm.quantityUnit || "طن",
+          quantityUnit: tripForm.quantityUnit || T.common.defaultUnit,
           truckCost: Number(tripForm.truckCost) || 0,
           driverCut: Number(tripForm.driverCut) || 0,
           companyProfit: Number(tripForm.companyProfit) || 0,
@@ -527,14 +564,13 @@ export default function App() {
           originFactory: resaleForm.originFactory || "",
           factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
           totalTonnage: Number(resaleForm.totalTonnage) || 0,
-          quantityUnit: resaleForm.quantityUnit || "طن",
+          quantityUnit: resaleForm.quantityUnit || T.common.defaultUnit,
           clientSellingPrice: Number(resaleForm.clientSellingPrice) || 0,
           truckCost: Number(resaleForm.truckCost) || 0,
           driverCost: Number(resaleForm.driverCost) || 0,
           explicitProfit: Number(resaleForm.explicitProfit) || 0,
           driverName: resaleForm.driverName || "",
-          tripCount: Number(resaleForm.tripCount) || 0,
-          tripUnitCost: Number(resaleForm.tripUnitCost) || 0,
+          tripCount: Math.max(1, Number(resaleForm.tripCount) || 1),
         };
 
         if (modalType === "add") {
@@ -547,7 +583,7 @@ export default function App() {
           id: expenseForm.id || localNextId("EXP-", expenses.map(e => e.id)),
           date: expenseForm.date || "",
           category: expenseForm.category || "Fuel",
-          truckPlate: expenseForm.truckPlate || "عام مجهول",
+          truckPlate: expenseForm.truckPlate || T.expenses.unknownPlate,
           amount: Number(expenseForm.amount) || 0,
           status: expenseForm.status as 'Paid' | 'Pending' || "Paid"
         };
@@ -561,7 +597,7 @@ export default function App() {
       setIsModalOpen(false);
       refreshAllData();
     } catch (err: any) {
-      alert(`تعذر حفظ السجل: ${err.message}`);
+      alert(T.dialogs.saveFailed(err.message));
     }
   };
 
@@ -574,7 +610,7 @@ export default function App() {
   const handlePrint = () => {
     const originalTitle = document.title;
     if (selectedReceipt) {
-      document.title = `وصل-${selectedReceipt.data.id}`;
+      document.title = `${T.dialogs.receiptFilePrefix}-${selectedReceipt.data.id}`;
     }
     const restoreTitle = () => {
       document.title = originalTitle;
@@ -600,7 +636,7 @@ export default function App() {
     e.target.value = "";
     if (!file) return;
 
-    if (!window.confirm("سيؤدي الاستيراد إلى استبدال جميع البيانات الحالية في قاعدة البيانات بالكامل بمحتوى الملف المحدد. هل تريد المتابعة؟")) {
+    if (!window.confirm(T.dialogs.confirmImport)) {
       return;
     }
 
@@ -609,10 +645,31 @@ export default function App() {
       const parsed = JSON.parse(text);
       const result = await importBackup(parsed);
       const { client_trips = 0, material_resales = 0, expenses: expensesCount = 0 } = result.imported;
-      alert(`تم الاستيراد بنجاح:\n${client_trips} رحلة نقل، ${material_resales} عملية إعادة بيع، ${expensesCount} مصروف.\nسيتم إعادة تحميل الصفحة الآن.`);
+      alert(T.dialogs.importSucceeded(client_trips, material_resales, expensesCount));
       window.location.reload();
     } catch (err: any) {
-      alert(`فشل استيراد النسخة الاحتياطية: ${err.message}`);
+      alert(T.dialogs.importFailed(err.message));
+    }
+  };
+
+  // --- Wipe the database ---
+  // Deliberately gated behind a typed word rather than a plain confirm(): this
+  // deletes every record and cannot be undone, and it is reachable from the
+  // main header where a stray click is otherwise easy.
+  const [isResetOpen, setIsResetOpen] = useState(false);
+  const [resetTyped, setResetTyped] = useState("");
+  const [resetting, setResetting] = useState(false);
+
+  const handleResetConfirm = async () => {
+    if (resetTyped.trim() !== T.reset.confirmWord) return;
+    setResetting(true);
+    try {
+      const result = await resetAllData();
+      alert(T.reset.done(result.total));
+      window.location.reload();
+    } catch (err: any) {
+      alert(T.reset.failed(err.message));
+      setResetting(false);
     }
   };
 
@@ -620,9 +677,9 @@ export default function App() {
   const tab1ChartData = useMemo(() => {
     return filteredClientTrips.slice(0, 10).map(trip => ({
       name: trip.id,
-      "تكلفة الشاحنة": trip.truckCost,
-      "مستحقات السائق": trip.driverCut,
-      "هامش الشركة": trip.companyProfit,
+      [T.charts.truckCost]: trip.truckCost,
+      [T.charts.driverDue]: trip.driverCut,
+      [T.charts.companyMargin]: trip.companyProfit,
     })).reverse();
   }, [filteredClientTrips]);
 
@@ -632,9 +689,9 @@ export default function App() {
       const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
       return {
         name: tx.id,
-        "تكلفة شراء المادة": sourcingCost,
-        "سعر البيع النهائي": tx.clientSellingPrice,
-        "إجمالي الربح الفعلي": tx.explicitProfit + (tx.clientSellingPrice - (sourcingCost + tx.truckCost + tx.driverCost + tx.explicitProfit))
+        [T.charts.materialPurchaseCost]: sourcingCost,
+        [T.charts.finalSellingPrice]: tx.clientSellingPrice,
+        [T.charts.actualTotalProfit]: resaleTrueProfit(tx, sourcingCost)
       };
     }).reverse();
   }, [filteredResaleTxs]);
@@ -729,18 +786,18 @@ export default function App() {
           <div className="max-w-2xl mx-auto border-2 border-dashed border-slate-400 p-8 rounded-lg bg-white text-black space-y-6">
             <div className="flex justify-between items-center border-b-2 border-slate-800 pb-4">
               <div className="flex items-center gap-3">
-                <img src={logoUrl} alt="شعار الشركة" className="h-16 w-16 object-contain shrink-0" />
+                <img src={logoUrl} alt={T.header.logoAlt} className="h-16 w-16 object-contain shrink-0" />
                 <div>
-                  <h1 className="text-2xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلاوي عبد المالك</h1>
-                  <p className="text-xs text-slate-500">فاتورة رسمية</p>
-                  <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
+                  <h1 className="text-2xl font-bold font-display text-slate-950">{T.brand.companyName}</h1>
+                  <p className="text-xs text-slate-500">{T.facture.subtitle}</p>
+                  <p className="text-xs text-slate-600">{T.facture.systemDateLabel} {formatAlgerianDate(new Date())}</p>
                 </div>
               </div>
               <div className="text-left">
                 <div className="bg-slate-200 text-slate-900 border border-slate-400 px-4 py-2 font-mono text-lg font-bold rounded">
                   {selectedReceipt.data.id}
                 </div>
-                <p className="text-xs text-slate-500 mt-1">تاريخ النقل: {selectedReceipt.data.date}</p>
+                <p className="text-xs text-slate-500 mt-1">{T.facture.transportDateLabel} {selectedReceipt.data.date}</p>
               </div>
             </div>
 
@@ -748,31 +805,31 @@ export default function App() {
               <div className="grid grid-cols-2 gap-y-2 text-xs">
                 <div>
                   <span className="text-slate-600">
-                    {selectedReceipt.type === "transport" ? "اسم العميل:" : "الزبون النهائي:"}
+                    {selectedReceipt.type === "transport" ? T.facture.clientLabel : T.facture.endClientLabel}
                   </span>{" "}
                   <strong className="text-slate-900">
                     {selectedReceipt.type === "transport" ? selectedReceipt.data.clientName : selectedReceipt.data.endClient}
                   </strong>
                 </div>
                 <div>
-                  <span className="text-slate-600">الكمية الإجمالية:</span>{" "}
-                  <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || "طن"}</strong>
+                  <span className="text-slate-600">{T.facture.quantityLabel}</span>{" "}
+                  <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || T.common.defaultUnit}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-600">المادة المشحونة:</span>{" "}
+                  <span className="text-slate-600">{T.facture.materialLabel}</span>{" "}
                   <strong className="text-slate-900">{selectedReceipt.data.materialType || "—"}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-600">منشأ الشحنة:</span>{" "}
+                  <span className="text-slate-600">{T.facture.originLabel}</span>{" "}
                   <strong className="text-slate-900">{selectedReceipt.data.originFactory || "—"}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-600">الوجهة المستهدفة:</span>{" "}
+                  <span className="text-slate-600">{T.facture.destinationLabel}</span>{" "}
                   <strong className="text-slate-900">{selectedReceipt.data.destination || "—"}</strong>
                 </div>
                 {selectedReceipt.data.driverName && (
                   <div>
-                    <span className="text-slate-600">السائق:</span>{" "}
+                    <span className="text-slate-600">{T.facture.driverLabel}</span>{" "}
                     <strong className="text-slate-900">{selectedReceipt.data.driverName}</strong>
                   </div>
                 )}
@@ -789,34 +846,48 @@ export default function App() {
               if (selectedReceipt.type === "resale") {
                 const unitPrice = selectedReceipt.data.factoryPurchasePrice || 0;
                 const qty = selectedReceipt.data.totalTonnage || 0;
-                const unit = selectedReceipt.data.quantityUnit || "طن";
+                const unit = selectedReceipt.data.quantityUnit || T.common.defaultUnit;
                 const productSubtotal = unitPrice * qty;
                 const transportPrice = factureTotal - productSubtotal;
+                // What the client pays per trip: this line's own total split
+                // across the trips, NOT the company's cost, so the margin
+                // stays private.
+                //
+                // Money is never rounded on an invoice. If the total does not
+                // divide into whole dinars there is no exact per-trip price to
+                // print, so none is printed — the line simply shows its total.
+                // The form flags this while the selling price is being entered,
+                // so the operator can make it divide and get the breakdown.
+                const factureTrips = Math.max(1, selectedReceipt.data.tripCount || 1);
+                const perTripExact = transportPrice % factureTrips === 0;
+                const perTripPrice = (transportPrice / factureTrips).toLocaleString();
                 return (
                   <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-slate-700">ثمن البضاعة ({qty} {unit} × {unitPrice.toLocaleString()} دج)</span>
-                      <span className="font-mono font-bold text-slate-900">{productSubtotal.toLocaleString()} دج</span>
+                      <span className="text-slate-700">{T.facture.goodsPriceLabel(qty, unit, unitPrice.toLocaleString())}</span>
+                      <span className="font-mono font-bold text-slate-900">{productSubtotal.toLocaleString()} {T.common.currency}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
                       <span className="text-slate-700">
-                        {(selectedReceipt.data.tripCount > 0 && selectedReceipt.data.tripUnitCost > 0)
-                          ? `سعر النقل والتوصيل (${selectedReceipt.data.tripCount} رحلات × ${selectedReceipt.data.tripUnitCost.toLocaleString()} دج)`
-                          : "سعر النقل والتوصيل"}
+                        {factureTrips > 1 && perTripExact
+                          ? T.facture.deliveryPriceMultiTrip(factureTrips, perTripPrice)
+                          : factureTrips > 1
+                            ? T.facture.deliveryPriceTripsOnly(factureTrips)
+                            : T.facture.deliveryPriceLabel}
                       </span>
-                      <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} دج</span>
+                      <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} {T.common.currency}</span>
                     </div>
                     <div className="flex justify-between items-center border-t-2 border-slate-800 pt-2">
-                      <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
-                      <span className="text-2xl font-mono font-bold text-slate-950">{factureTotal.toLocaleString()} دج</span>
+                      <span className="text-base font-bold text-slate-900">{T.facture.grandTotalLabel}</span>
+                      <span className="text-2xl font-mono font-bold text-slate-950">{factureTotal.toLocaleString()} {T.common.currency}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
-                      <span className="text-slate-700">المدفوع</span>
-                      <span className="font-mono font-bold text-slate-900">{facturePaid.toLocaleString()} دج</span>
+                      <span className="text-slate-700">{T.facture.paidLabel}</span>
+                      <span className="font-mono font-bold text-slate-900">{facturePaid.toLocaleString()} {T.common.currency}</span>
                     </div>
                     <div className="flex justify-between items-center text-base">
-                      <span className="font-bold text-slate-900">المتبقي</span>
-                      <span className="font-mono font-bold text-slate-950">{factureRemaining.toLocaleString()} دج</span>
+                      <span className="font-bold text-slate-900">{T.facture.remainingLabel}</span>
+                      <span className="font-mono font-bold text-slate-950">{factureRemaining.toLocaleString()} {T.common.currency}</span>
                     </div>
                   </div>
                 );
@@ -825,20 +896,20 @@ export default function App() {
               return (
                 <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-700">سعر النقل</span>
-                    <span className="font-mono font-bold text-slate-900">{factureTotal.toLocaleString()} دج</span>
+                    <span className="text-slate-700">{T.facture.transportPriceLabel}</span>
+                    <span className="font-mono font-bold text-slate-900">{factureTotal.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <div className="flex justify-between items-center border-t border-slate-300 pt-2">
-                    <span className="text-base font-bold text-slate-900">المبلغ الإجمالي الواجب دفعه</span>
-                    <span className="text-2xl font-mono font-bold text-slate-950">{factureTotal.toLocaleString()} دج</span>
+                    <span className="text-base font-bold text-slate-900">{T.facture.grandTotalLabel}</span>
+                    <span className="text-2xl font-mono font-bold text-slate-950">{factureTotal.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
-                    <span className="text-slate-700">المدفوع</span>
-                    <span className="font-mono font-bold text-slate-900">{facturePaid.toLocaleString()} دج</span>
+                    <span className="text-slate-700">{T.facture.paidLabel}</span>
+                    <span className="font-mono font-bold text-slate-900">{facturePaid.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <div className="flex justify-between items-center text-base">
-                    <span className="font-bold text-slate-900">المتبقي</span>
-                    <span className="font-mono font-bold text-slate-950">{factureRemaining.toLocaleString()} دج</span>
+                    <span className="font-bold text-slate-900">{T.facture.remainingLabel}</span>
+                    <span className="font-mono font-bold text-slate-950">{factureRemaining.toLocaleString()} {T.common.currency}</span>
                   </div>
                 </div>
               );
@@ -846,22 +917,22 @@ export default function App() {
 
             <div className="border-t border-slate-800 pt-8 flex justify-between text-xs">
               <div className="text-center w-1/3">
-                <p className="font-bold mb-8">توقيع السائق والمسؤول</p>
+                <p className="font-bold mb-8">{T.facture.signDriverAndManager}</p>
                 <div className="h-0.5 bg-slate-300 w-32 mx-auto"></div>
               </div>
               <div className="text-center w-1/3">
-                <p className="font-bold mb-8">إمضاء وختم العميل</p>
+                <p className="font-bold mb-8">{T.facture.signClientStamp}</p>
                 <div className="h-0.5 bg-slate-300 w-32 mx-auto"></div>
               </div>
               <div className="text-center w-1/3">
-                <p className="font-bold mb-8">صادق عليها المسؤول</p>
+                <p className="font-bold mb-8">{T.printCommon.approvedBy}</p>
                 <div className="h-0.5 bg-slate-300 w-32 mx-auto"></div>
-                <p className="font-mono text-[10px] text-slate-500 mt-1">لعلاوي عبد المالك</p>
+                <p className="font-mono text-[10px] text-slate-500 mt-1">{T.brand.signatureName}</p>
               </div>
             </div>
 
             <div className="text-center text-[10px] text-slate-400 border-t border-slate-200 pt-4 font-mono">
-              وصل شحن محمي للنظام الداخلي - لا يتطلب ختم السحابة الإلكترونية
+              {T.facture.footerNote}
             </div>
           </div>
         </div>
@@ -876,16 +947,29 @@ export default function App() {
 
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-700 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/10">
-                  <img src={logoUrl} alt="شعار الشركة" width={60} height={60} className="object-contain" />
+                  <img src={logoUrl} alt={T.header.logoAlt} width={60} height={60} className="object-contain" />
                 </div>
                 <div>
                   <h1 className="text-2xl font-black tracking-tight font-display bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
-                    <span>نقل وتوزيع البضائع لعلاوي عبد المالك</span>
-                    <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full font-sans tracking-wide">بيئة آمنة</span>
+                    <span>{T.brand.companyName}</span>
+                    <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full font-sans tracking-wide">{T.brand.safeModeBadge}</span>
+                    {/* Build identity. The single fastest way to tell whether a
+                        machine is running the current build — if this badge is
+                        missing entirely, it is an old install. */}
+                    <span
+                      title={appInfo ? T.header.versionTitle(appInfo.buildId, appInfo.databaseFile) : undefined}
+                      className="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2.5 py-0.5 rounded-full font-sans tracking-wide cursor-help"
+                    >
+                      {T.header.versionLabel}{" "}
+                      {/* dir="ltr" so "1.1.0" is not reordered by the RTL layout */}
+                      <span dir="ltr" className="font-mono">
+                        {appInfo ? appInfo.appVersion : T.header.versionLoading}
+                      </span>
+                    </span>
                   </h1>
                   <p className="text-xs text-slate-400 font-sans mt-0.5 flex items-center gap-1">
                     <Compass className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                    <span>مراقبة وتدقيق تكاليف الشحن، الأرباح المستترة، ومصاريف الأسطول البري</span>
+                    <span>{T.brand.tagline}</span>
                   </p>
                 </div>
               </div>
@@ -893,25 +977,33 @@ export default function App() {
               {/* Status Indicator & Offline Badge */}
               <div className="flex items-center gap-2">
                 <div className="hidden md:flex flex-col text-left px-3 py-1 bg-slate-800 border border-slate-700/80 rounded-lg text-xs leading-tight">
-                  <span className="text-slate-400 font-sans text-right">المسؤول</span>
-                  <span className="text-white font-mono font-bold">السيد لعلاوي عبد المالك</span>
+                  <span className="text-slate-400 font-sans text-right">{T.brand.managerLabel}</span>
+                  <span className="text-white font-mono font-bold">{T.brand.managerName}</span>
                 </div>
 
                 <button
                   onClick={handleExportBackup}
-                  title="تصدير نسخة احتياطية من قاعدة البيانات"
+                  title={T.header.exportBackupTitle}
                   className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg transition"
                 >
                   <Download className="h-3.5 w-3.5" />
-                  <span className="hidden lg:inline">تصدير نسخة احتياطية</span>
+                  <span className="hidden lg:inline">{T.header.exportBackup}</span>
                 </button>
                 <button
                   onClick={handleImportClick}
-                  title="استيراد نسخة احتياطية إلى قاعدة البيانات"
+                  title={T.header.importBackupTitle}
                   className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg transition"
                 >
                   <Upload className="h-3.5 w-3.5" />
-                  <span className="hidden lg:inline">استيراد نسخة احتياطية</span>
+                  <span className="hidden lg:inline">{T.header.importBackup}</span>
+                </button>
+                <button
+                  onClick={() => { setResetTyped(""); setIsResetOpen(true); }}
+                  title={T.header.resetDataTitle}
+                  className="flex items-center gap-1.5 bg-rose-950/60 hover:bg-rose-900/60 border border-rose-900 text-rose-300 text-xs px-3 py-1.5 rounded-lg transition"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden lg:inline">{T.header.resetData}</span>
                 </button>
                 <input
                   ref={importFileInputRef}
@@ -945,34 +1037,34 @@ export default function App() {
               <div className="lg:col-span-8 space-y-4">
                 <div className="inline-flex items-center gap-2 bg-slate-800/80 border border-slate-700 px-3 py-1 rounded-lg text-xs">
                   <Tag className="h-3.5 w-3.5 text-cyan-400" />
-                  <span className="font-bold text-slate-300">الملخص المالي الشامل للفترة المحددة</span>
+                  <span className="font-bold text-slate-300">{T.master.periodBadge}</span>
                 </div>
 
                 <h2 className="text-xl sm:text-2xl font-extrabold text-white font-display">
-                  معادلة صافي ربح الشركة
+                  {T.master.title}
                 </h2>
 
                 {/* Mathematical visual schema */}
                 <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-300">
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">أرباح رحلات نقل العملاء</span>
-                    <span className="text-emerald-400 font-bold font-mono">+{tab1Stats.netMargin.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500">{T.master.transportProfit}</span>
+                    <span className="text-emerald-400 font-bold font-mono">+{tab1Stats.netMargin.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <span className="text-slate-600 font-bold text-lg">+</span>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">أرباح بيع وتوصيل المواد</span>
-                    <span className="text-emerald-400 font-bold font-mono">+{tab2Stats.totalTrueProfit.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500">{T.master.resaleProfit}</span>
+                    <span className="text-emerald-400 font-bold font-mono">+{tab2Stats.totalTrueProfit.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <span className="text-slate-600 font-bold text-lg">-</span>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">مصاريف الأسطول المدفوعة</span>
-                    <span className="text-rose-400 font-bold font-mono">-{tab3Stats.totalOverhead.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500">{T.master.fleetExpenses}</span>
+                    <span className="text-rose-400 font-bold font-mono">-{tab3Stats.totalOverhead.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <span className="text-slate-500 font-bold text-lg">=</span>
                   <div className="bg-slate-800/40 px-3 py-1 rounded border border-slate-700 flex flex-col">
-                    <span className="text-[10px] text-cyan-400 font-bold">صافي ربح الشركة</span>
+                    <span className="text-[10px] text-cyan-400 font-bold">{T.master.netProfit}</span>
                     <span className={`font-mono font-bold text-base ${masterNetProfit >= 0 ? 'text-cyan-300' : 'text-rose-400'}`}>
-                      {masterNetProfit.toLocaleString()} دج
+                      {masterNetProfit.toLocaleString()} {T.common.currency}
                     </span>
                   </div>
                 </div>
@@ -981,47 +1073,47 @@ export default function App() {
                     has really been collected/paid according to the ledgers. */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                   <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[10px] text-slate-500 block">المحصل من العملاء</span>
-                    <span className="text-emerald-400 font-bold font-mono text-sm">{periodCash.collected.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500 block">{T.master.cashCollected}</span>
+                    <span className="text-emerald-400 font-bold font-mono text-sm">{periodCash.collected.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[10px] text-slate-500 block">متبقي على العملاء</span>
-                    <span className="text-amber-400 font-bold font-mono text-sm">{periodCash.receivable.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500 block">{T.master.cashReceivable}</span>
+                    <span className="text-amber-400 font-bold font-mono text-sm">{periodCash.receivable.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[10px] text-slate-500 block">المدفوع للسائقين</span>
-                    <span className="text-blue-400 font-bold font-mono text-sm">{periodCash.driverSettled.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500 block">{T.master.driverPaid}</span>
+                    <span className="text-blue-400 font-bold font-mono text-sm">{periodCash.driverSettled.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[10px] text-slate-500 block">متبقي للسائقين</span>
-                    <span className="text-rose-400 font-bold font-mono text-sm">{periodCash.driverPayable.toLocaleString()} دج</span>
+                    <span className="text-[10px] text-slate-500 block">{T.master.driverPayable}</span>
+                    <span className="text-rose-400 font-bold font-mono text-sm">{periodCash.driverPayable.toLocaleString()} {T.common.currency}</span>
                   </div>
                 </div>
               </div>
 
               {/* High impact visualization counter */}
               <div className="lg:col-span-4 bg-[#1e293b]/50 border border-slate-800 rounded-2xl p-5 text-center flex flex-col justify-center items-center">
-                <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">صافي ربح الشركة خلال الفترة</p>
+                <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">{T.master.periodProfitTitle}</p>
 
                 <div className="mt-2 flex items-baseline gap-2">
                   <span className={`text-4xl font-black font-mono tracking-tight ${masterNetProfit >= 0 ? 'text-emerald-400 drop-shadow-[0_0_12px_rgba(34,197,94,0.2)]' : 'text-rose-500'}`}>
                     {masterNetProfit.toLocaleString()}
                   </span>
-                  <span className="text-sm text-slate-400">دج</span>
+                  <span className="text-sm text-slate-400">{T.common.currency}</span>
                 </div>
 
-                <p className="mt-1 text-[10px] text-slate-500">ربح محتسب على الفواتير، وليس نقداً في الخزينة</p>
+                <p className="mt-1 text-[10px] text-slate-500">{T.master.accrualNote}</p>
 
                 <div className="mt-3 flex items-center justify-center gap-1.5 py-1 px-3.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300">
                   {masterNetProfit >= 0 ? (
                     <>
                       <TrendingUp className="h-4 w-4 text-emerald-400" />
-                      <span>الموازنة في حالة كفاءة وربحية إيجابية</span>
+                      <span>{T.master.healthy}</span>
                     </>
                   ) : (
                     <>
                       <TrendingDown className="h-4 w-4 text-rose-400 animate-bounce" />
-                      <span className="text-rose-300">المصاريف تتخطى هوامش الربح الحالية</span>
+                      <span className="text-rose-300">{T.master.unhealthy}</span>
                     </>
                   )}
                 </div>
@@ -1029,7 +1121,7 @@ export default function App() {
                 {periodCash.receivable > 0 && (
                   <div className="mt-2 flex items-center justify-center gap-1.5 py-1 px-3 rounded-full bg-amber-950/40 border border-amber-900/60 text-[10px] text-amber-300">
                     <AlertCircle className="h-3 w-3 shrink-0" />
-                    <span>{periodCash.receivable.toLocaleString()} دج لم تُحصّل بعد من العملاء</span>
+                    <span>{periodCash.receivable.toLocaleString()} {T.common.currency} {T.master.uncollectedSuffix}</span>
                   </div>
                 )}
               </div>
@@ -1049,7 +1141,7 @@ export default function App() {
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="بحث سريع برقم السند، الجهة، أو اسِم العميل..."
+                  placeholder={T.filters.searchPlaceholder}
                   value={filters.searchQuery}
                   onChange={(e) => setFilters(prev => ({ ...prev, searchQuery: e.target.value }))}
                   className="w-full pl-3 pr-10 py-2 bg-slate-950 border border-slate-800 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-100"
@@ -1064,7 +1156,7 @@ export default function App() {
                   onChange={(e) => setFilters(prev => ({ ...prev, dateStart: e.target.value }))}
                   className="px-2 py-1.5 bg-slate-950 border border-slate-800 text-xs rounded-lg text-slate-300"
                 />
-                <span className="text-slate-500 text-xs">إلى</span>
+                <span className="text-slate-500 text-xs">{T.filters.dateTo}</span>
                 <input
                   type="date"
                   value={filters.dateEnd}
@@ -1077,9 +1169,9 @@ export default function App() {
               <button
                 onClick={resetFilters}
                 className="px-3 py-1.5 text-xs bg-slate-800 border border-slate-700/80 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                title={`إعادة تعيين إلى ${ALGERIAN_MONTHS[new Date().getMonth()]} ${new Date().getFullYear()}`}
+                title={T.filters.resetTo(ALGERIAN_MONTHS[new Date().getMonth()], new Date().getFullYear())}
               >
-                مسح التصفية
+                {T.filters.clear}
               </button>
 
             </div>
@@ -1095,7 +1187,7 @@ export default function App() {
                   }`}
               >
                 <Compass className="h-3.5 w-3.5" />
-                <span>لوحة القيادة الموحدة</span>
+                <span>{T.tabs.overview}</span>
               </button>
 
               <button
@@ -1106,7 +1198,7 @@ export default function App() {
                   }`}
               >
                 <Truck className="h-3.5 w-3.5" />
-                <span>رحلات نقل العملاء</span>
+                <span>{T.tabs.transport}</span>
               </button>
 
               <button
@@ -1117,7 +1209,7 @@ export default function App() {
                   }`}
               >
                 <Briefcase className="h-3.5 w-3.5" />
-                <span>بيع وتوصيل المواد</span>
+                <span>{T.tabs.resale}</span>
               </button>
 
               <button
@@ -1128,7 +1220,7 @@ export default function App() {
                   }`}
               >
                 <CreditCard className="h-3.5 w-3.5 text-emerald-400" />
-                <span>حسابات العملاء</span>
+                <span>{T.tabs.clients}</span>
               </button>
 
               <button
@@ -1139,7 +1231,7 @@ export default function App() {
                   }`}
               >
                 <Truck className="h-3.5 w-3.5 text-cyan-400" />
-                <span>تصفية السائقين</span>
+                <span>{T.tabs.drivers}</span>
               </button>
 
               <button
@@ -1150,7 +1242,7 @@ export default function App() {
                   }`}
               >
                 <TrendingDown className="h-3.5 w-3.5 text-rose-400" />
-                <span>مصاريف الأسطول الأُخرى</span>
+                <span>{T.tabs.expenses}</span>
               </button>
 
             </div>
@@ -1229,54 +1321,54 @@ export default function App() {
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">عدد الرحلات الجارية</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">{T.transport.kpiTripCount}</span>
                     <span className="text-3xl font-black font-mono text-blue-400 block mt-1">{filteredClientTrips.length}</span>
-                    <span className="text-[10px] text-slate-500 mt-0.5">رحلة مرصودة للعملاء الفعليين</span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">{T.transport.kpiTripCountHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي الإيرادات</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.transport.kpiRevenue}</span>
                       <TrendingUp className="h-4 w-4 text-emerald-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-emerald-400 block mt-1">{tab1Stats.grossRevenue.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">تكلفة الشحن الكلية المحتسبة للعميل</span>
+                    <span className="text-2xl font-black font-mono text-emerald-400 block mt-1">{tab1Stats.grossRevenue.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.transport.kpiRevenueHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي أجور السائقين</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.transport.kpiDriverWages}</span>
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-blue-400 block mt-1">{tab1Stats.driverPayout.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">الأجور المستحقة عن الرحلات (مدفوعة وغير مدفوعة)</span>
+                    <span className="text-2xl font-black font-mono text-blue-400 block mt-1">{tab1Stats.driverPayout.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.transport.kpiDriverWagesHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">الربح الصافي للشركة</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.transport.kpiNetMargin}</span>
                       <PiggyBank className="h-4 w-4 text-cyan-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-cyan-300 block mt-1">{tab1Stats.netMargin.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">الهامش الباقي لخزانة المؤسسة</span>
+                    <span className="text-2xl font-black font-mono text-cyan-300 block mt-1">{tab1Stats.netMargin.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.transport.kpiNetMarginHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي على العملاء</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.transport.kpiClientOutstanding}</span>
                       <AlertCircle className="h-4 w-4 text-amber-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-amber-400 block mt-1">{tab1Stats.clientOutstanding.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">مبالغ لم يسددها العملاء بعد</span>
+                    <span className="text-2xl font-black font-mono text-amber-400 block mt-1">{tab1Stats.clientOutstanding.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.transport.kpiClientOutstandingHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي للسائقين</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.transport.kpiDriverOutstanding}</span>
                       <AlertCircle className="h-4 w-4 text-rose-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab1Stats.driverOutstanding.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">مستحقات لم تُدفع للسائقين بعد</span>
+                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab1Stats.driverOutstanding.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.transport.kpiDriverOutstandingHint}</span>
                   </div>
                 </div>
 
@@ -1286,13 +1378,13 @@ export default function App() {
                   {/* Cost Split stacked bar chart */}
                   <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">توزيع التكلفة الصافي لكل رحلة</h4>
-                      <p className="text-[10px] text-slate-400 mb-4">أشرطة تظهر انقسام العوائد بين الشاحنة، السائق وهامش المؤسسة</p>
+                      <h4 className="text-sm font-bold text-white mb-1">{T.transport.chartTitle}</h4>
+                      <p className="text-[10px] text-slate-400 mb-4">{T.transport.chartSubtitle}</p>
                     </div>
 
                     <div className="h-60 w-full relative">
                       {tab1ChartData.length === 0 ? (
-                        <div className="h-full flex items-center justify-center text-xs text-slate-500">لا توجد بيانات مخطط كافية للفلترة</div>
+                        <div className="h-full flex items-center justify-center text-xs text-slate-500">{T.transport.chartEmpty}</div>
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={tab1ChartData} layout="vertical" margin={{ left: -10, right: 10, top: 5, bottom: 5 }}>
@@ -1300,9 +1392,9 @@ export default function App() {
                             <XAxis type="number" stroke="#64748b" fontSize={9} />
                             <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={9} width={45} />
                             <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155" }} />
-                            <Bar dataKey="تكلفة الشاحنة" stackId="a" fill="#3b82f6" />
-                            <Bar dataKey="مستحقات السائق" stackId="a" fill="#10b981" />
-                            <Bar dataKey="هامش الشركة" stackId="a" fill="#06b6d4" />
+                            <Bar dataKey={T.charts.truckCost} stackId="a" fill="#3b82f6" />
+                            <Bar dataKey={T.charts.driverDue} stackId="a" fill="#10b981" />
+                            <Bar dataKey={T.charts.companyMargin} stackId="a" fill="#06b6d4" />
                           </BarChart>
                         </ResponsiveContainer>
                       )}
@@ -1311,15 +1403,15 @@ export default function App() {
                     <div className="flex gap-2 text-[10px] text-slate-400 mt-4 justify-around bg-slate-950 p-2.5 rounded-lg border border-slate-800">
                       <div className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
-                        <span>شاحنات</span>
+                        <span>{T.transport.legendTrucks}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-[#10b981]"></span>
-                        <span>سائقين</span>
+                        <span>{T.transport.legendDrivers}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-[#06b6d4]"></span>
-                        <span>أرباح الشركة</span>
+                        <span>{T.transport.legendProfit}</span>
                       </div>
                     </div>
                   </div>
@@ -1328,13 +1420,13 @@ export default function App() {
                   <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-bold text-white">تفاصيل الشحنات والمطالبات</h4>
+                        <h4 className="text-sm font-bold text-white">{T.transport.tableTitle}</h4>
                         <button
                           onClick={() => handleOpenAdd("transport")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
                         >
                           <Plus className="h-3.5 w-3.5" />
-                          <span>تسجيل رحلة عميل</span>
+                          <span>{T.transport.addButton}</span>
                         </button>
                       </div>
 
@@ -1342,21 +1434,21 @@ export default function App() {
                         <table className="w-full text-right text-sm">
                           <thead>
                             <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-slate-950">
-                              <th className="p-3">رقم السند</th>
-                              <th className="p-3">التاريخ</th>
-                              <th className="p-3">العميل والمادة</th>
-                              <th className="p-3">تفاصيل النقل</th>
-                              <th className="p-3">الكمية</th>
-                              <th className="p-3">التعريفة الإجمالية</th>
-                              <th className="p-3">مدفوعات العميل</th>
-                              <th className="p-3">السائق ومدفوعاته</th>
-                              <th className="p-3 text-left">أدوات</th>
+                              <th className="p-3">{T.transport.colId}</th>
+                              <th className="p-3">{T.transport.colDate}</th>
+                              <th className="p-3">{T.transport.colClientMaterial}</th>
+                              <th className="p-3">{T.transport.colRouteDetails}</th>
+                              <th className="p-3">{T.transport.colQuantity}</th>
+                              <th className="p-3">{T.transport.colTotalFee}</th>
+                              <th className="p-3">{T.transport.colClientPayments}</th>
+                              <th className="p-3">{T.transport.colDriverPayments}</th>
+                              <th className="p-3 text-left">{T.transport.colTools}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
                             {filteredClientTrips.length === 0 ? (
                               <tr>
-                                <td colSpan={9} className="p-6 text-center text-slate-500">لا توجد سجلات رحلات مطابقة للتصفية الحالية.</td>
+                                <td colSpan={9} className="p-6 text-center text-slate-500">{T.transport.empty}</td>
                               </tr>
                             ) : (
                               filteredClientTrips.map(trip => {
@@ -1371,24 +1463,24 @@ export default function App() {
                                     </td>
                                     <td className="p-3 text-slate-300">
                                       <div className="flex items-center gap-1">
-                                        <span className="text-xs">من:</span>
+                                        <span className="text-xs">{T.transport.routeFrom}</span>
                                         <span className="text-slate-400">{trip.originFactory}</span>
                                       </div>
                                       <div className="flex items-center gap-1">
-                                        <span className="text-xs text-cyan-400">إلى:</span>
+                                        <span className="text-xs text-cyan-400">{T.transport.routeTo}</span>
                                         <span className="text-slate-400">{trip.destination}</span>
                                       </div>
                                     </td>
-                                    <td className="p-3 font-mono text-slate-100">{trip.totalTonnage} {trip.quantityUnit || "طن"}</td>
-                                    <td className="p-3 font-mono font-bold text-emerald-400">{totalCost.toLocaleString()} دج</td>
+                                    <td className="p-3 font-mono text-slate-100">{trip.totalTonnage} {trip.quantityUnit || T.common.defaultUnit}</td>
+                                    <td className="p-3 font-mono font-bold text-emerald-400">{totalCost.toLocaleString()} {T.common.currency}</td>
                                     <td className="p-3">
-                                      <div className="font-mono text-slate-300">{(trip.clientPaid || 0).toLocaleString()} دج</div>
+                                      <div className="font-mono text-slate-300">{(trip.clientPaid || 0).toLocaleString()} {T.common.currency}</div>
                                       <div className="mt-1"><PaymentBadge paid={trip.clientPaid || 0} total={totalCost} /></div>
                                     </td>
                                     <td className="p-3">
                                       <div className="font-bold text-slate-100">{trip.driverName || "—"}</div>
                                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                        {(trip.driverPaid || 0).toLocaleString()} / {trip.driverCut.toLocaleString()} دج
+                                        {(trip.driverPaid || 0).toLocaleString()} / {trip.driverCut.toLocaleString()} {T.common.currency}
                                       </div>
                                       <div className="mt-1"><PaymentBadge paid={trip.driverPaid || 0} total={trip.driverCut} /></div>
                                     </td>
@@ -1398,10 +1490,10 @@ export default function App() {
                                         <button
                                           onClick={() => handleOpenReceipt("transport", trip)}
                                           className="p-1 px-2.5 rounded bg-slate-850 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-300 transition flex items-center gap-1"
-                                          title="طباعة الوصل"
+                                          title={T.transport.receiptButtonTitle}
                                         >
                                           <Printer className="h-3 w-3" />
-                                          <span>وصل</span>
+                                          <span>{T.transport.receiptButton}</span>
                                         </button>
 
                                         <button
@@ -1447,59 +1539,59 @@ export default function App() {
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">إجمالي مبيعات الزبائن</span>
-                    <span className="text-3xl font-black font-mono text-cyan-400 block mt-1">{tab2Stats.tradingTurnover.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">حجم تعاملات التوريد الكلي للمواد</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">{T.resale.kpiTurnover}</span>
+                    <span className="text-3xl font-black font-mono text-cyan-400 block mt-1">{tab2Stats.tradingTurnover.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.resale.kpiTurnoverHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">رأس المال والمشتريات</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.resale.kpiCapital}</span>
                       <TrendingDown className="h-4 w-4 text-rose-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab2Stats.capitalOutlay.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">القيمة المستحقة للمصنع لشراء المواد</span>
+                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab2Stats.capitalOutlay.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.resale.kpiCapitalHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">أجور النقل الظاهرة</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.resale.kpiVisibleTransport}</span>
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
                     <span className="text-2xl font-black font-mono text-blue-400 block mt-1">
-                      {filteredResaleTxs.reduce((sum, tx) => sum + tx.truckCost + tx.driverCost + tx.explicitProfit, 0).toLocaleString()} دج
+                      {filteredResaleTxs.reduce((sum, tx) => sum + resaleTrips(tx) * (tx.truckCost + tx.driverCost + tx.explicitProfit), 0).toLocaleString()} {T.common.currency}
                     </span>
-                    <span className="text-[10px] text-slate-500">رسوم النقل المقيدة على المعاملة</span>
+                    <span className="text-[10px] text-slate-500">{T.resale.kpiVisibleTransportHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">إجمالي الربح الحقيقي</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.resale.kpiTrueProfit}</span>
                       <ProfitIcon className="h-4 w-4 text-emerald-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-emerald-400 block mt-1">{tab2Stats.totalTrueProfit.toLocaleString()} دج</span>
+                    <span className="text-2xl font-black font-mono text-emerald-400 block mt-1">{tab2Stats.totalTrueProfit.toLocaleString()} {T.common.currency}</span>
                     <span className="text-[10px] text-slate-500 mt-1 flex items-center gap-0.5 text-xs text-slate-300">
                       <Info className="h-3 w-3 inline text-emerald-400" />
-                      <span>يشمل الكسب المستتر والهامش الظاهر</span>
+                      <span>{T.resale.kpiTrueProfitHint}</span>
                     </span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي على العملاء</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.resale.kpiClientOutstanding}</span>
                       <AlertCircle className="h-4 w-4 text-amber-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-amber-400 block mt-1">{tab2Stats.clientOutstanding.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">مبالغ لم يسددها الزبائن بعد</span>
+                    <span className="text-2xl font-black font-mono text-amber-400 block mt-1">{tab2Stats.clientOutstanding.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.resale.kpiClientOutstandingHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">متبقي للسائقين</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{T.resale.kpiDriverOutstanding}</span>
                       <AlertCircle className="h-4 w-4 text-rose-400" />
                     </div>
-                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab2Stats.driverOutstanding.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-500">مستحقات لم تُدفع للسائقين بعد</span>
+                    <span className="text-2xl font-black font-mono text-rose-400 block mt-1">{tab2Stats.driverOutstanding.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.resale.kpiDriverOutstandingHint}</span>
                   </div>
                 </div>
 
@@ -1509,13 +1601,13 @@ export default function App() {
                   {/* Sourcing Cost vs Final selling Combo */}
                   <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">مقارنة كلفة شراء السلع بعوائد البيع</h4>
-                      <p className="text-[10px] text-slate-400 mb-4">يعكس بوضوح الكفاءة النقدية للشركة وإجمالي الكسب المستتر</p>
+                      <h4 className="text-sm font-bold text-white mb-1">{T.resale.chartTitle}</h4>
+                      <p className="text-[10px] text-slate-400 mb-4">{T.resale.chartSubtitle}</p>
                     </div>
 
                     <div className="h-64 w-full">
                       {tab2ChartData.length === 0 ? (
-                        <div className="h-full flex items-center justify-center text-xs text-slate-500">لا توجد بيانات كافية</div>
+                        <div className="h-full flex items-center justify-center text-xs text-slate-500">{T.resale.chartEmpty}</div>
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart data={tab2ChartData} margin={{ left: -10, right: 10, top: 10, bottom: 5 }}>
@@ -1523,18 +1615,18 @@ export default function App() {
                             <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
                             <YAxis stroke="#64748b" fontSize={9} />
                             <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155" }} />
-                            <Bar dataKey="تكلفة شراء المادة" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
-                            <Bar dataKey="سعر البيع النهائي" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
-                            <Line type="monotone" dataKey="إجمالي الربح الفعلي" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                            <Bar dataKey={T.charts.materialPurchaseCost} fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
+                            <Bar dataKey={T.charts.finalSellingPrice} fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                            <Line type="monotone" dataKey={T.charts.actualTotalProfit} stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
                           </ComposedChart>
                         </ResponsiveContainer>
                       )}
                     </div>
 
                     <div className="flex gap-2 text-[10px] text-slate-500 mt-2 justify-around">
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#ef4444]"></span>كلفة الشراء</span>
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>مبيعات التوريد</span>
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#10b981]"></span>عائد الأرباح الكلية</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#ef4444]"></span>{T.resale.legendPurchase}</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>{T.resale.legendSales}</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#10b981]"></span>{T.resale.legendProfit}</span>
                     </div>
                   </div>
 
@@ -1542,13 +1634,13 @@ export default function App() {
                   <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-bold text-white">إعادة بيع وتوريد السلع</h4>
+                        <h4 className="text-sm font-bold text-white">{T.resale.tableTitle}</h4>
                         <button
                           onClick={() => handleOpenAdd("resale")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
                         >
                           <Plus className="h-3.5 w-3.5" />
-                          <span>تسجيل صفقة تجارية</span>
+                          <span>{T.resale.addButton}</span>
                         </button>
                       </div>
 
@@ -1556,26 +1648,26 @@ export default function App() {
                         <table className="w-full text-right text-sm">
                           <thead>
                             <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-slate-950">
-                              <th className="p-3">رقم العملية</th>
-                              <th className="p-3">التاريخ</th>
-                              <th className="p-3">الزبون النهائي</th>
-                              <th className="p-3">تفاصيل الأسعار</th>
-                              <th className="p-3">الهامش المستتر</th>
-                              <th className="p-3">إجمالي الكسب الحقيقي</th>
-                              <th className="p-3">مدفوعات العميل</th>
-                              <th className="p-3">السائق ومدفوعاته</th>
-                              <th className="p-3 text-left">أدوات</th>
+                              <th className="p-3">{T.resale.colId}</th>
+                              <th className="p-3">{T.resale.colDate}</th>
+                              <th className="p-3">{T.resale.colEndClient}</th>
+                              <th className="p-3">{T.resale.colPricing}</th>
+                              <th className="p-3">{T.resale.colHiddenMargin}</th>
+                              <th className="p-3">{T.resale.colTrueProfit}</th>
+                              <th className="p-3">{T.resale.colClientPayments}</th>
+                              <th className="p-3">{T.resale.colDriverPayments}</th>
+                              <th className="p-3 text-left">{T.resale.colTools}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
                             {filteredResaleTxs.length === 0 ? (
                               <tr>
-                                <td colSpan={9} className="p-6 text-center text-slate-500">لا توجد صفقات تجارية مسجلة.</td>
+                                <td colSpan={9} className="p-6 text-center text-slate-500">{T.resale.empty}</td>
                               </tr>
                             ) : (
                               filteredResaleTxs.map(tx => {
                                 const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
-                                const visibleTransportFee = tx.truckCost + tx.driverCost + tx.explicitProfit;
+                                const visibleTransportFee = resaleTrips(tx) * (tx.truckCost + tx.driverCost + tx.explicitProfit);
                                 const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
                                 const totalTrueProfit = tx.explicitProfit + hiddenMargin;
 
@@ -1585,29 +1677,29 @@ export default function App() {
                                     <td className="p-3 text-slate-300 font-mono">{tx.date}</td>
                                     <td className="p-3">
                                       <div className="font-bold text-slate-100">{tx.endClient}</div>
-                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{tx.totalTonnage} {tx.quantityUnit || "طن"} × {tx.factoryPurchasePrice} دج</div>
+                                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{tx.totalTonnage} {tx.quantityUnit || T.common.defaultUnit} × {tx.factoryPurchasePrice} {T.common.currency}</div>
                                       {tx.destination && (
-                                        <div className="text-[10px] text-slate-500 mt-0.5">إلى: {tx.destination}</div>
+                                        <div className="text-[10px] text-slate-500 mt-0.5">{T.resale.cellDestination} {tx.destination}</div>
                                       )}
                                     </td>
                                     <td className="p-3 text-slate-300 font-mono">
-                                      <div>البيع: {tx.clientSellingPrice.toLocaleString()}</div>
-                                      <div className="text-[10px] text-slate-500">الكلفة: {sourcingCost.toLocaleString()}</div>
+                                      <div>{T.resale.cellSelling} {tx.clientSellingPrice.toLocaleString()}</div>
+                                      <div className="text-[10px] text-slate-500">{T.resale.cellCost} {sourcingCost.toLocaleString()}</div>
                                     </td>
                                     <td className={`p-3 font-mono font-semibold ${hiddenMargin >= 0 ? "text-amber-400" : "text-rose-400"}`}>
-                                      {hiddenMargin.toLocaleString()} دج
+                                      {hiddenMargin.toLocaleString()} {T.common.currency}
                                     </td>
                                     <td className="p-3 font-mono font-bold text-emerald-400">
-                                      {totalTrueProfit.toLocaleString()} دج
+                                      {totalTrueProfit.toLocaleString()} {T.common.currency}
                                     </td>
                                     <td className="p-3">
-                                      <div className="font-mono text-slate-300">{(tx.clientPaid || 0).toLocaleString()} دج</div>
+                                      <div className="font-mono text-slate-300">{(tx.clientPaid || 0).toLocaleString()} {T.common.currency}</div>
                                       <div className="mt-1"><PaymentBadge paid={tx.clientPaid || 0} total={tx.clientSellingPrice} /></div>
                                     </td>
                                     <td className="p-3">
                                       <div className="font-bold text-slate-100">{tx.driverName || "—"}</div>
                                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                        {(tx.driverPaid || 0).toLocaleString()} / {tx.driverCost.toLocaleString()} دج
+                                        {(tx.driverPaid || 0).toLocaleString()} / {tx.driverCost.toLocaleString()} {T.common.currency}
                                       </div>
                                       <div className="mt-1"><PaymentBadge paid={tx.driverPaid || 0} total={tx.driverCost} /></div>
                                     </td>
@@ -1619,7 +1711,7 @@ export default function App() {
                                           className="p-1 px-2 text-slate-300 bg-slate-850 hover:bg-slate-800 border border-slate-700 rounded transition flex items-center gap-1"
                                         >
                                           <Printer className="h-3 w-3" />
-                                          <span>وصل</span>
+                                          <span>{T.transport.receiptButton}</span>
                                         </button>
 
                                         <button
@@ -1665,23 +1757,23 @@ export default function App() {
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">سجلات الأعباء الكلية</span>
+                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">{T.expenses.kpiCount}</span>
                     <span className="text-3xl font-black font-mono text-rose-400 block mt-1">{filteredExpenses.length}</span>
-                    <span className="text-[10px] text-slate-500">عمليّة صرف تشغيلية مسجلة</span>
+                    <span className="text-[10px] text-slate-500">{T.expenses.kpiCountHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">إجمالي المصاريف والمحروقات</span>
-                    <span className="text-3xl font-black font-mono text-rose-500 block mt-1">{tab3Stats.totalOverhead.toLocaleString()} دج</span>
-                    <span className="text-[10px] text-slate-400">المصاريف المدفوعة فقط (لا تشمل المعلّقة)</span>
+                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">{T.expenses.kpiTotal}</span>
+                    <span className="text-3xl font-black font-mono text-rose-500 block mt-1">{tab3Stats.totalOverhead.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-400">{T.expenses.kpiTotalHint}</span>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">الأعباء المعلّقة</span>
+                    <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">{T.expenses.kpiPending}</span>
                     <span className="text-2xl font-black font-mono text-amber-500 block">
-                      {tab3Stats.pendingTotal.toLocaleString()} دج
+                      {tab3Stats.pendingTotal.toLocaleString()} {T.common.currency}
                     </span>
-                    <span className="text-[10px] text-slate-500">قيد الدراسة ولم تُحتسب ضمن المصاريف</span>
+                    <span className="text-[10px] text-slate-500">{T.expenses.kpiPendingHint}</span>
                   </div>
                 </div>
 
@@ -1690,13 +1782,13 @@ export default function App() {
                   {/* Expense Breakdown Categories */}
                   <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">تقسيم النفقات التشغيلية</h4>
-                      <p className="text-[10px] text-slate-400 mb-4">عرض مرئي للأعباء التي تم كبحها أو صرفها من الميزانية الكلية</p>
+                      <h4 className="text-sm font-bold text-white mb-1">{T.expenses.chartTitle}</h4>
+                      <p className="text-[10px] text-slate-400 mb-4">{T.expenses.chartSubtitle}</p>
                     </div>
 
                     <div className="h-56 w-full relative flex items-center justify-center">
                       {expensePieData.length === 0 ? (
-                        <div className="text-xs text-slate-500">لا توجد مصاريف مدفوعة للعرض</div>
+                        <div className="text-xs text-slate-500">{T.expenses.chartEmpty}</div>
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
@@ -1726,7 +1818,7 @@ export default function App() {
                             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></span>
                             <span className="truncate">{item.name}</span>
                           </div>
-                          <span className="font-mono text-slate-400">({item.value.toLocaleString()} دج)</span>
+                          <span className="font-mono text-slate-400">({item.value.toLocaleString()} {T.common.currency})</span>
                         </div>
                       ))}
                     </div>
@@ -1736,13 +1828,13 @@ export default function App() {
                   <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-bold text-white">جدول المصاريف والصيانات والأجور</h4>
+                        <h4 className="text-sm font-bold text-white">{T.expenses.tableTitle}</h4>
                         <button
                           onClick={() => handleOpenAdd("expenses")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
                         >
                           <Plus className="h-3.5 w-3.5" />
-                          <span>إدراج سند أعباء</span>
+                          <span>{T.expenses.addButton}</span>
                         </button>
                       </div>
 
@@ -1750,19 +1842,19 @@ export default function App() {
                         <table className="w-full text-right text-sm">
                           <thead>
                             <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-slate-950">
-                              <th className="p-3">معرف المصرف</th>
-                              <th className="p-3">تاريخ القيد</th>
-                              <th className="p-3">الفئة والنوع</th>
-                              <th className="p-3">رقم لوحة المركبة</th>
-                              <th className="p-3">المبلغ المصروف</th>
-                              <th className="p-3">الحالة النقدية</th>
-                              <th className="p-3 text-left">أدوات</th>
+                              <th className="p-3">{T.expenses.colId}</th>
+                              <th className="p-3">{T.expenses.colDate}</th>
+                              <th className="p-3">{T.expenses.colCategory}</th>
+                              <th className="p-3">{T.expenses.colPlate}</th>
+                              <th className="p-3">{T.expenses.colAmount}</th>
+                              <th className="p-3">{T.expenses.colStatus}</th>
+                              <th className="p-3 text-left">{T.expenses.colTools}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
                             {filteredExpenses.length === 0 ? (
                               <tr>
-                                <td colSpan={7} className="p-6 text-center text-slate-500">لا توجد مصاريف مقيدة.</td>
+                                <td colSpan={7} className="p-6 text-center text-slate-500">{T.expenses.empty}</td>
                               </tr>
                             ) : (
                               filteredExpenses.map(exp => (
@@ -1773,13 +1865,13 @@ export default function App() {
                                     {TRANSLATE_EXPENSE_CATEGORY[exp.category] || exp.category}
                                   </td>
                                   <td className="p-3 text-slate-400 font-mono">{exp.truckPlate}</td>
-                                  <td className="p-3 font-mono font-bold text-rose-400">{exp.amount.toLocaleString()} دج</td>
+                                  <td className="p-3 font-mono font-bold text-rose-400">{exp.amount.toLocaleString()} {T.common.currency}</td>
                                   <td className="p-3">
                                     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${exp.status === "Paid"
                                       ? "bg-emerald-900/30 text-emerald-400 border border-emerald-800/65"
                                       : "bg-amber-900/40 text-amber-300 border border-amber-800"
                                       }`}>
-                                      {exp.status === "Paid" ? "مدفوعة" : "معلّقة"}
+                                      {exp.status === "Paid" ? T.expenses.statusPaid : T.expenses.statusPendingShort}
                                     </span>
                                   </td>
                                   <td className="p-3">
@@ -1818,6 +1910,65 @@ export default function App() {
 
       </div>
 
+      {/* RENDER MODAL: WIPE THE DATABASE (irreversible — typed confirmation) */}
+      {isResetOpen && (
+        <div className="no-print fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-900/70 max-w-md w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative dir-rtl">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-600 to-red-500"></div>
+
+            <h3 className="text-base font-extrabold text-white flex items-center gap-2 mb-3">
+              <Trash2 className="h-4.5 w-4.5 text-rose-500" />
+              {T.reset.title}
+            </h3>
+
+            <p className="text-xs text-slate-300 leading-relaxed mb-2">{T.reset.body}</p>
+            <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2 mb-3">
+              {T.reset.backupHint}
+            </p>
+
+            {/* Name the exact file about to be wiped. On a machine with more
+                than one Windows account there is more than one database, and
+                this is where knowing which one matters most. */}
+            {appInfo && (
+              <p className="text-[10px] text-slate-500 mb-4 break-all">
+                {T.reset.databaseFileLabel}{" "}
+                <span dir="ltr" className="font-mono text-slate-400">{appInfo.databaseFile}</span>
+              </p>
+            )}
+
+            <label className="block text-xs text-slate-400 mb-1">
+              {T.reset.confirmPrompt(T.reset.confirmWord)}
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={resetTyped}
+              onChange={e => setResetTyped(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 p-2 rounded-lg text-white font-bold mb-5"
+            />
+
+            <div className="flex justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={resetting}
+                onClick={() => setIsResetOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition disabled:opacity-50"
+              >
+                {T.reset.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={resetting || resetTyped.trim() !== T.reset.confirmWord}
+                onClick={handleResetConfirm}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold transition"
+              >
+                {resetting ? T.reset.working : T.reset.submit}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* RENDER MODAL: FOR ADD/EDIT WORKFLOW */}
       <AnimatePresence>
         {isModalOpen && (
@@ -1834,10 +1985,10 @@ export default function App() {
                 <h3 className="text-base font-extrabold text-white flex items-center gap-2">
                   <Truck className="h-4.5 w-4.5 text-blue-500" />
                   <span>
-                    {modalType === "add" ? "إضافة قيد جديد" : "تحديث وتعديل القيد"}
+                    {modalType === "add" ? T.form.titleAdd : T.form.titleEdit}
                   </span>
                   <span className="text-xs font-normal text-slate-400">
-                    ({modalRecordType === "transport" ? "شحن عميل" : modalRecordType === "resale" ? "تجارة وتوريد" : "أعباء ومصاريف"})
+                    ({modalRecordType === "transport" ? T.form.kindTransport : modalRecordType === "resale" ? T.form.kindResale : T.form.kindExpense})
                   </span>
                 </h3>
                 <button
@@ -1861,7 +2012,7 @@ export default function App() {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">رقم سند النقل</label>
+                        <label className="block text-slate-400 mb-1">{T.form.tripId}</label>
                         <input
                           type="text"
                           required
@@ -1872,7 +2023,7 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">التاريخ</label>
+                        <label className="block text-slate-400 mb-1">{T.form.date}</label>
                         <input
                           type="date"
                           required
@@ -1885,21 +2036,21 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">اسم العميل بالكامل</label>
+                        <label className="block text-slate-400 mb-1">{T.form.clientName}</label>
                         <input
                           type="text"
                           required
-                          placeholder="مثال: شركة بوعمامة للبناء"
+                          placeholder={T.form.clientNamePlaceholder}
                           value={tripForm.clientName}
                           onChange={e => setTripForm(p => ({ ...p, clientName: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">اسم السائق</label>
+                        <label className="block text-slate-400 mb-1">{T.form.driverName}</label>
                         <input
                           type="text"
-                          placeholder="السائق المكلف بالرحلة"
+                          placeholder={T.form.tripDriverPlaceholder}
                           value={tripForm.driverName}
                           onChange={e => setTripForm(p => ({ ...p, driverName: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -1909,22 +2060,22 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">المصنع المصدر للسلعة</label>
+                        <label className="block text-slate-400 mb-1">{T.form.originFactory}</label>
                         <input
                           type="text"
                           required
-                          placeholder="مصنع الأسمنت"
+                          placeholder={T.form.originFactoryPlaceholder}
                           value={tripForm.originFactory}
                           onChange={e => setTripForm(p => ({ ...p, originFactory: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">وجهة النكوص والمسار</label>
+                        <label className="block text-slate-400 mb-1">{T.form.destination}</label>
                         <input
                           type="text"
                           required
-                          placeholder="موقع 1500 مسكن"
+                          placeholder={T.form.destinationPlaceholder}
                           value={tripForm.destination}
                           onChange={e => setTripForm(p => ({ ...p, destination: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -1934,18 +2085,18 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">نوع المادة المشحونة</label>
+                        <label className="block text-slate-400 mb-1">{T.form.materialType}</label>
                         <input
                           type="text"
                           required
-                          placeholder="حصى أو إسمنت"
+                          placeholder={T.form.materialPlaceholder}
                           value={tripForm.materialType}
                           onChange={e => setTripForm(p => ({ ...p, materialType: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">الكمية الإجمالية</label>
+                        <label className="block text-slate-400 mb-1">{T.form.quantity}</label>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -1959,7 +2110,7 @@ export default function App() {
                             type="text"
                             list="quantity-units"
                             required
-                            placeholder="الوحدة"
+                            placeholder={T.form.unitPlaceholder}
                             value={tripForm.quantityUnit}
                             onChange={e => setTripForm(p => ({ ...p, quantityUnit: e.target.value }))}
                             className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -1970,10 +2121,10 @@ export default function App() {
 
                     {/* STRUCTURE LOGIC - DRIVERS AND PROFITS CORES */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-cyan-400 font-bold block">تجزئة التكلفة والصافي</span>
+                      <span className="text-[10px] text-cyan-400 font-bold block">{T.form.costBreakdownTitle}</span>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
-                          <label className="block text-slate-500 mb-1">كراء الشاحنة</label>
+                          <label className="block text-slate-500 mb-1">{T.form.truckHire}</label>
                           <input
                             type="number"
                             required
@@ -1983,7 +2134,7 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-500 mb-1">أجرة السائق</label>
+                          <label className="block text-slate-500 mb-1">{T.form.driverWage}</label>
                           <input
                             type="number"
                             required
@@ -1993,7 +2144,7 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-500 mb-1">ربح الشركة الصافي</label>
+                          <label className="block text-slate-500 mb-1">{T.form.companyProfit}</label>
                           <input
                             type="number"
                             required
@@ -2004,8 +2155,8 @@ export default function App() {
                         </div>
                       </div>
                       <div className="pt-2 text-[10px] text-slate-400 flex justify-between">
-                        <span>إجمالي تعريفة النقل التقديرية للعميل:</span>
-                        <strong className="text-emerald-400">{computedFormTotalTransportFee.toLocaleString()} دج</strong>
+                        <span>{T.form.estimatedTotalFee}</span>
+                        <strong className="text-emerald-400">{computedFormTotalTransportFee.toLocaleString()} {T.common.currency}</strong>
                       </div>
                     </div>
 
@@ -2017,7 +2168,7 @@ export default function App() {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">رقم عملية التوريد</label>
+                        <label className="block text-slate-400 mb-1">{T.form.resaleId}</label>
                         <input
                           type="text"
                           required
@@ -2028,7 +2179,7 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">التاريخ</label>
+                        <label className="block text-slate-400 mb-1">{T.form.date}</label>
                         <input
                           type="date"
                           required
@@ -2040,11 +2191,11 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label className="block text-slate-400 mb-1">العميل النهائي المستلم للسلعة</label>
+                      <label className="block text-slate-400 mb-1">{T.form.endClient}</label>
                       <input
                         type="text"
                         required
-                        placeholder="مشترين الجملة الخارجيين"
+                        placeholder={T.form.endClientPlaceholder}
                         value={resaleForm.endClient}
                         onChange={e => setResaleForm(p => ({ ...p, endClient: e.target.value }))}
                         className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -2053,21 +2204,21 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">الوجهة (المكان الذي ستُنقل إليه السلعة)</label>
+                        <label className="block text-slate-400 mb-1">{T.form.resaleDestination}</label>
                         <input
                           type="text"
                           required
-                          placeholder="موقع التسليم النهائي"
+                          placeholder={T.form.resaleDestinationPlaceholder}
                           value={resaleForm.destination}
                           onChange={e => setResaleForm(p => ({ ...p, destination: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">اسم السائق</label>
+                        <label className="block text-slate-400 mb-1">{T.form.driverName}</label>
                         <input
                           type="text"
-                          placeholder="السائق المكلف بالتوصيل"
+                          placeholder={T.form.resaleDriverPlaceholder}
                           value={resaleForm.driverName}
                           onChange={e => setResaleForm(p => ({ ...p, driverName: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -2077,22 +2228,22 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">نوع المادة المباعة</label>
+                        <label className="block text-slate-400 mb-1">{T.form.resaleMaterial}</label>
                         <input
                           type="text"
                           required
-                          placeholder="حصى أو إسمنت"
+                          placeholder={T.form.materialPlaceholder}
                           value={resaleForm.materialType}
                           onChange={e => setResaleForm(p => ({ ...p, materialType: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">المصنع المصدر للسلعة</label>
+                        <label className="block text-slate-400 mb-1">{T.form.originFactory}</label>
                         <input
                           type="text"
                           required
-                          placeholder="مصنع الأسمنت"
+                          placeholder={T.form.originFactoryPlaceholder}
                           value={resaleForm.originFactory}
                           onChange={e => setResaleForm(p => ({ ...p, originFactory: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -2102,7 +2253,7 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">سعر الشراء من الشركة الأصلية (للوحدة دج)</label>
+                        <label className="block text-slate-400 mb-1">{T.form.factoryPurchasePrice}</label>
                         <input
                           type="number"
                           required
@@ -2112,7 +2263,7 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">الكمية الإجمالية</label>
+                        <label className="block text-slate-400 mb-1">{T.form.quantity}</label>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -2125,7 +2276,7 @@ export default function App() {
                             type="text"
                             list="quantity-units"
                             required
-                            placeholder="الوحدة"
+                            placeholder={T.form.unitPlaceholder}
                             value={resaleForm.quantityUnit}
                             onChange={e => setResaleForm(p => ({ ...p, quantityUnit: e.target.value }))}
                             className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
@@ -2135,27 +2286,30 @@ export default function App() {
                     </div>
 
                     <div className="text-[10px] text-slate-400 -mt-1 flex justify-between bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
-                      <span>تكلفة شراء البضاعة (الكمية × سعر الوحدة):</span>
-                      <strong className="text-rose-300 font-mono">{tempSourcingCost.toLocaleString()} دج</strong>
+                      <span>{T.form.sourcingCostLabel}</span>
+                      <strong className="text-rose-300 font-mono">{tempSourcingCost.toLocaleString()} {T.common.currency}</strong>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">سعر البيع للزبون (للوحدة دج)</label>
+                        <label className="block text-slate-400 mb-1">{T.form.unitSellingPrice}</label>
+                        {/* Never rounded: when the total does not divide evenly
+                            by the quantity, the operator must see the real
+                            price per unit, not a tidied-up one. */}
                         <input
                           type="number"
-                          value={resaleUnitPrice ? Math.round(resaleUnitPrice) : ""}
-                          placeholder="سعر بيع الوحدة الواحدة"
+                          value={resaleUnitPrice || ""}
+                          placeholder={T.form.unitSellingPricePlaceholder}
                           onChange={e => setResaleSellingByUnit(parseFloat(e.target.value) || 0)}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">السعر البيعي الإجمالي للزبون</label>
+                        <label className="block text-slate-400 mb-1">{T.form.totalSellingPrice}</label>
                         <input
                           type="number"
                           required
-                          placeholder="ثمن المادة + ثمن خدمات الشحن ككل"
+                          placeholder={T.form.totalSellingPricePlaceholder}
                           value={resaleForm.clientSellingPrice}
                           onChange={e => setResaleSellingTotal(parseInt(e.target.value) || 0)}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-mono font-bold"
@@ -2165,10 +2319,10 @@ export default function App() {
 
                     {/* TRUCK DRIVER EXPLICIT STRUCTURE */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-cyan-400 font-bold block">تحليل كلفة النظير اللوجستي الصريح</span>
+                      <span className="text-[10px] text-cyan-400 font-bold block">{T.form.logisticsTitle}</span>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
-                          <label className="block text-slate-500 mb-1">كراء الشاحنة</label>
+                          <label className="block text-slate-500 mb-1">{T.form.truckHire}</label>
                           <input
                             type="number"
                             required
@@ -2178,7 +2332,7 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-500 mb-1">كلفة السائق</label>
+                          <label className="block text-slate-500 mb-1">{T.form.resaleDriverCost}</label>
                           <input
                             type="number"
                             required
@@ -2188,7 +2342,7 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-500 mb-1">الهامش البارز</label>
+                          <label className="block text-slate-500 mb-1">{T.form.explicitMargin}</label>
                           <input
                             type="number"
                             required
@@ -2199,44 +2353,57 @@ export default function App() {
                         </div>
                       </div>
                       <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                        <span>قيمة الكسب المستتر: <strong className="text-amber-400">{tempHiddenMargin.toLocaleString()} دج</strong></span>
-                        <span>إجمالي صافي الربح الحقيقي: <strong className="text-emerald-400">{computedFormTotalTrueProfit.toLocaleString()} دج</strong></span>
+                        <span>{T.form.hiddenMarginLabel} <strong className="text-amber-400">{tempHiddenMargin.toLocaleString()} {T.common.currency}</strong></span>
+                        <span>{T.form.trueProfitLabel} <strong className="text-emerald-400">{computedFormTotalTrueProfit.toLocaleString()} {T.common.currency}</strong></span>
                       </div>
                     </div>
 
-                    {/* Optional multi-trip breakdown */}
+                    {/* Trips. The per-trip price is not typed in: it is the
+                        logistics box above (truck + driver + profit), which
+                        describes one trip. Entering it by hand used to let the
+                        two disagree. */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-violet-400 font-bold block">تعدد الرحلات (اختياري)</span>
+                      <span className="text-[10px] text-violet-400 font-bold block">{T.form.multiTripTitle}</span>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-slate-500 mb-1">عدد الرحلات</label>
+                          <label className="block text-slate-500 mb-1">{T.form.tripCount}</label>
                           <input
                             type="number"
-                            min="0"
-                            value={resaleForm.tripCount || ""}
-                            placeholder="0"
-                            onChange={e => setResaleForm(p => ({ ...p, tripCount: parseInt(e.target.value) || 0 }))}
+                            min="1"
+                            step="1"
+                            required
+                            value={resaleForm.tripCount ?? 1}
+                            onChange={e => setResaleForm(p => ({ ...p, tripCount: Math.max(1, parseInt(e.target.value) || 1) }))}
                             className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-500 mb-1">سعر الرحلة الواحدة (دج)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={resaleForm.tripUnitCost || ""}
-                            placeholder="0"
-                            onChange={e => setResaleForm(p => ({ ...p, tripUnitCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
-                          />
+                          <label className="block text-slate-500 mb-1">{T.form.tripUnitCost}</label>
+                          <div className="w-full bg-slate-900/60 border border-slate-800 p-1 rounded text-violet-300 font-mono">
+                            {resalePerTripCost.toLocaleString()} {T.common.currency}
+                          </div>
                         </div>
                       </div>
-                      {(Number(resaleForm.tripCount) > 0 && Number(resaleForm.tripUnitCost) > 0) && (
-                        <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                          <span>إجمالي تكلفة النقل:</span>
-                          <strong className="text-violet-400 font-mono">{(Number(resaleForm.tripCount) * Number(resaleForm.tripUnitCost)).toLocaleString()} دج</strong>
-                        </div>
-                      )}
+                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
+                        <span>{T.form.multiTripTotal}</span>
+                        <strong className="text-violet-400 font-mono">
+                          {resaleTripCount} × {resalePerTripCost.toLocaleString()} = {resaleTransportTotal.toLocaleString()} {T.common.currency}
+                        </strong>
+                      </div>
+
+                      {/* Preview of the figure the CLIENT will see on the
+                          invoice, which is the transport portion of the selling
+                          price split across the trips — not the cost above.
+                          Shown here so an uneven split can be spotted and the
+                          selling price nudged before anything is printed. */}
+                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
+                        <span>{T.form.clientPerTripLabel}</span>
+                        <strong className={resaleClientPerTripExact ? "text-cyan-300 font-mono" : "text-amber-400"}>
+                          {resaleClientPerTripExact
+                            ? `${resaleClientPerTrip.toLocaleString()} ${T.common.currency}`
+                            : T.form.perTripNotExact}
+                        </strong>
+                      </div>
                     </div>
 
                     {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
@@ -2247,7 +2414,7 @@ export default function App() {
                   <div className="space-y-3 text-xs">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">رقم الفاتورة / المصرف</label>
+                        <label className="block text-slate-400 mb-1">{T.form.expenseId}</label>
                         <input
                           type="text"
                           required
@@ -2258,7 +2425,7 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">التاريخ</label>
+                        <label className="block text-slate-400 mb-1">{T.form.date}</label>
                         <input
                           type="date"
                           required
@@ -2270,7 +2437,7 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label className="block text-slate-400 mb-1">تصنيف النفقات الرئيسي</label>
+                      <label className="block text-slate-400 mb-1">{T.form.expenseCategory}</label>
                       <select
                         value={expenseForm.category}
                         onChange={e => setExpenseForm(p => ({ ...p, category: e.target.value }))}
@@ -2283,11 +2450,11 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label className="block text-slate-400 mb-1">رقم لوحة الشاحنة المستهدفة</label>
+                      <label className="block text-slate-400 mb-1">{T.form.truckPlate}</label>
                       <input
                         type="text"
                         required
-                        placeholder="مثال: 01345-116-22"
+                        placeholder={T.form.truckPlatePlaceholder}
                         value={expenseForm.truckPlate}
                         onChange={e => setExpenseForm(p => ({ ...p, truckPlate: e.target.value }))}
                         className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-mono"
@@ -2296,7 +2463,7 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-400 mb-1">المبلغ المالي المصروف (دج)</label>
+                        <label className="block text-slate-400 mb-1">{T.form.expenseAmount}</label>
                         <input
                           type="number"
                           required
@@ -2306,14 +2473,14 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">الحالة النقدية والوفر</label>
+                        <label className="block text-slate-400 mb-1">{T.form.expenseStatus}</label>
                         <select
                           value={expenseForm.status}
                           onChange={e => setExpenseForm(p => ({ ...p, status: e.target.value as 'Paid' | 'Pending' }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                         >
-                          <option value="Paid">مدفوعة</option>
-                          <option value="Pending">قيد الدراسة والمطالبة</option>
+                          <option value="Paid">{T.expenses.statusPaid}</option>
+                          <option value="Pending">{T.expenses.statusPendingLong}</option>
                         </select>
                       </div>
                     </div>
@@ -2326,13 +2493,13 @@ export default function App() {
                     onClick={() => setIsModalOpen(false)}
                     className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition"
                   >
-                    إلغاء الأمر
+                    {T.form.cancel}
                   </button>
                   <button
                     type="submit"
                     className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-600/10 transition"
                   >
-                    حفظ وإدراج التعديل
+                    {T.form.save}
                   </button>
                 </div>
 
@@ -2356,7 +2523,7 @@ export default function App() {
               <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4 no-print">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
                   <Printer className="h-4 w-4 text-emerald-600 animate-pulse" />
-                  <span>معاينة وتأكيد الفاتورة المعتمدة محلياً</span>
+                  <span>{T.receiptPreview.header}</span>
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -2364,7 +2531,7 @@ export default function App() {
                     className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition shadow"
                   >
                     <Printer className="h-4 w-4" />
-                    <span>طباعة الوصل</span>
+                    <span>{T.receiptPreview.printButton}</span>
                   </button>
                   <button
                     onClick={() => setIsReceiptOpen(false)}
@@ -2380,127 +2547,135 @@ export default function App() {
 
                 <div className="flex justify-between items-start border-b border-slate-300 pb-4">
                   <div>
-                    <h2 className="text-xl font-bold font-display text-slate-950">نقل وتوزيع البضائع لعلاوي عبد المالك</h2>
-                    <p className="text-[10px] text-slate-500 mt-1 uppercase">وصل شحن داخلي رسمي</p>
-                    <p className="text-xs text-slate-600">التاريخ الحالي للنظام: {formatAlgerianDate(new Date())}</p>
+                    <h2 className="text-xl font-bold font-display text-slate-950">{T.brand.companyName}</h2>
+                    <p className="text-[10px] text-slate-500 mt-1 uppercase">{T.receiptPreview.docSubtitle}</p>
+                    <p className="text-xs text-slate-600">{T.facture.systemDateLabel} {formatAlgerianDate(new Date())}</p>
                   </div>
                   <div className="text-left">
                     <span className="bg-slate-200 text-slate-900 text-sm font-mono font-black border border-slate-400 px-3 py-1 rounded">
                       {selectedReceipt.data.id}
                     </span>
-                    <p className="text-[10px] text-slate-500 mt-1.5">تاريخ النقل: {selectedReceipt.data.date}</p>
+                    <p className="text-[10px] text-slate-500 mt-1.5">{T.facture.transportDateLabel} {selectedReceipt.data.date}</p>
                   </div>
                 </div>
 
                 {selectedReceipt.type === "transport" ? (
                   <div className="space-y-4 text-xs">
                     <div className="grid grid-cols-2 gap-y-2">
-                      <div><span className="text-slate-500">اسم العميل:</span> <strong className="text-slate-900">{selectedReceipt.data.clientName}</strong></div>
-                      <div><span className="text-slate-500">المادة المشحونة:</span> <strong className="text-slate-900">{selectedReceipt.data.materialType}</strong></div>
-                      <div><span className="text-slate-500">منشأ الشحنة:</span> <strong className="text-slate-900">{selectedReceipt.data.originFactory}</strong></div>
-                      <div><span className="text-slate-500">الوجهة المستهدفة:</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
-                      <div><span className="text-slate-500">الكمية الإجمالية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || "طن"}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.clientLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.clientName}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.materialLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.materialType}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.originLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.originFactory}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.destinationLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.quantityLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || T.common.defaultUnit}</strong></div>
                     </div>
 
                     <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-2">
                       <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 flex items-center justify-between">
-                        <span>منشور تكلفة الشحن</span>
-                        <span className="text-[9px] text-slate-400">عملة الحساب: الدينار الجزائري</span>
+                        <span>{T.receiptPreview.costSheetTitle}</span>
+                        <span className="text-[9px] text-slate-400">{T.receiptPreview.currencyNote}</span>
                       </h4>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>صرف كراء المركبة:</span>
-                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.truckHire}</span>
+                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>أجرة السائق:</span>
-                        <span className="font-mono">{selectedReceipt.data.driverCut.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.driverWage}</span>
+                        <span className="font-mono">{selectedReceipt.data.driverCut.toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>أرباح المؤسسة الصافية:</span>
-                        <span className="font-mono text-cyan-800 font-bold">+{selectedReceipt.data.companyProfit.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.companyProfit}</span>
+                        <span className="font-mono text-cyan-800 font-bold">+{selectedReceipt.data.companyProfit.toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900 bg-slate-105">
-                        <span>مجموع الفاتورة الكلي:</span>
+                        <span>{T.receiptPreview.invoiceTotal}</span>
                         <span className="font-mono text-emerald-600 text-sm">
-                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit).toLocaleString()} دج
+                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit).toLocaleString()} {T.common.currency}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
-                        <span>المدفوع من العميل:</span>
-                        <span className="font-mono">{(selectedReceipt.data.clientPaid || 0).toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.clientPaid}</span>
+                        <span className="font-mono">{(selectedReceipt.data.clientPaid || 0).toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1 font-bold">
-                        <span className="text-slate-800">المتبقي على العميل:</span>
+                        <span className="text-slate-800">{T.receiptPreview.clientRemaining}</span>
                         <span className="font-mono text-amber-700">
-                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} دج
+                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} {T.common.currency}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
-                        <span>السائق ({selectedReceipt.data.driverName || "غير محدد"}) — المدفوع له:</span>
-                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCut.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.driverPaidLine(selectedReceipt.data.driverName || T.receiptPreview.unknownDriver)}</span>
+                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCut.toLocaleString()} {T.common.currency}</span>
                       </div>
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-4 text-xs">
                     <div className="grid grid-cols-2 gap-y-2">
-                      <div><span className="text-slate-500">الزبون النهائي:</span> <strong className="text-slate-900">{selectedReceipt.data.endClient}</strong></div>
-                      <div><span className="text-slate-500">المادة المباعة:</span> <strong className="text-slate-900">{selectedReceipt.data.materialType || "—"}</strong></div>
-                      <div><span className="text-slate-500">منشأ الشحنة:</span> <strong className="text-slate-900">{selectedReceipt.data.originFactory || "—"}</strong></div>
-                      <div><span className="text-slate-500">الوجهة المستهدفة:</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
-                      <div><span className="text-slate-500">الكمية الإجمالية:</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || "طن"}</strong></div>
-                      <div><span className="text-slate-500">سعر شراء المصنع:</span> <strong className="text-slate-900">{selectedReceipt.data.factoryPurchasePrice.toLocaleString()} دج / {selectedReceipt.data.quantityUnit || "طن"}</strong></div>
-                      <div><span className="text-slate-500">كلفة السلع الكلية:</span> <strong className="text-slate-900">{(selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage).toLocaleString()} دج</strong></div>
+                      <div><span className="text-slate-500">{T.facture.endClientLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.endClient}</strong></div>
+                      <div><span className="text-slate-500">{T.receiptPreview.soldMaterialLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.materialType || "—"}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.originLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.originFactory || "—"}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.destinationLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.destination}</strong></div>
+                      <div><span className="text-slate-500">{T.facture.quantityLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.totalTonnage} {selectedReceipt.data.quantityUnit || T.common.defaultUnit}</strong></div>
+                      <div><span className="text-slate-500">{T.receiptPreview.factoryPriceLabel}</span> <strong className="text-slate-900">{selectedReceipt.data.factoryPurchasePrice.toLocaleString()} {T.common.currency} / {selectedReceipt.data.quantityUnit || T.common.defaultUnit}</strong></div>
+                      <div><span className="text-slate-500">{T.receiptPreview.goodsTotalCostLabel}</span> <strong className="text-slate-900">{(selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage).toLocaleString()} {T.common.currency}</strong></div>
                     </div>
 
                     <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-2">
                       <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 flex items-center justify-between">
-                        <span>تحليل الهياكل والتسعير اللوجستي الشامل</span>
-                        <span className="text-[10px] text-slate-400 font-mono">رقم: {selectedReceipt.data.id}</span>
+                        <span>{T.receiptPreview.pricingAnalysisTitle}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{T.receiptPreview.recordNoLabel} {selectedReceipt.data.id}</span>
                       </h4>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>كراء الشاحنة البرية:</span>
-                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.truckHireLong}</span>
+                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>أجرة السائق:</span>
-                        <span className="font-mono">{selectedReceipt.data.driverCost.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.driverWage}</span>
+                        <span className="font-mono">{selectedReceipt.data.driverCost.toLocaleString()} {T.common.currency}</span>
                       </div>
-                      {(selectedReceipt.data.tripCount > 0 && selectedReceipt.data.tripUnitCost > 0) && (
-                        <div className="flex justify-between py-1 text-slate-600">
-                          <span>عدد الرحلات:</span>
-                          <span className="font-mono">{selectedReceipt.data.tripCount} × {selectedReceipt.data.tripUnitCost.toLocaleString()} دج = {(selectedReceipt.data.tripCount * selectedReceipt.data.tripUnitCost).toLocaleString()} دج</span>
-                        </div>
-                      )}
+                      {/* Internal sheet, so the real per-trip arithmetic is
+                          shown here: trips x (truck + driver + profit). */}
+                      {(() => {
+                        const trips = Math.max(1, selectedReceipt.data.tripCount || 1);
+                        const perTrip = selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit;
+                        return (
+                          <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100 pt-2">
+                            <span>{T.receiptPreview.tripCountLabel}</span>
+                            <span className="font-mono">
+                              {trips} × {perTrip.toLocaleString()} {T.common.currency} = {(trips * perTrip).toLocaleString()} {T.common.currency}
+                            </span>
+                          </div>
+                        );
+                      })()}
                       <div className="flex justify-between py-1 text-slate-600">
-                        <span>هامش النقل الصريح:</span>
-                        <span className="font-mono text-slate-700">+{selectedReceipt.data.explicitProfit.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.explicitTransportMargin}</span>
+                        <span className="font-mono text-slate-700">+{selectedReceipt.data.explicitProfit.toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 font-bold bg-amber-50 px-2 rounded">
-                        <span className="text-amber-800">الأرباح المستترة من التسعير:</span>
+                        <span className="text-amber-800">{T.receiptPreview.hiddenProfit}</span>
                         <span className="font-mono text-amber-700">
-                          {+(selectedReceipt.data.clientSellingPrice - ((selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage) + selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit)).toLocaleString()} دج
+                          {+(selectedReceipt.data.clientSellingPrice - ((selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage) + selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit)).toLocaleString()} {T.common.currency}
                         </span>
                       </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900">
-                        <span>سعر البيع النهائي الإجمالي:</span>
+                        <span>{T.receiptPreview.finalSellingTotal}</span>
                         <span className="font-mono text-emerald-600 text-sm">
-                          {selectedReceipt.data.clientSellingPrice.toLocaleString()} دج
+                          {selectedReceipt.data.clientSellingPrice.toLocaleString()} {T.common.currency}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
-                        <span>المدفوع من الزبون:</span>
-                        <span className="font-mono">{(selectedReceipt.data.clientPaid || 0).toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.buyerPaid}</span>
+                        <span className="font-mono">{(selectedReceipt.data.clientPaid || 0).toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1 font-bold">
-                        <span className="text-slate-800">المتبقي على الزبون:</span>
+                        <span className="text-slate-800">{T.receiptPreview.buyerRemaining}</span>
                         <span className="font-mono text-amber-700">
-                          {(selectedReceipt.data.clientSellingPrice - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} دج
+                          {(selectedReceipt.data.clientSellingPrice - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} {T.common.currency}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
-                        <span>السائق ({selectedReceipt.data.driverName || "غير محدد"}) — المدفوع له:</span>
-                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCost.toLocaleString()} دج</span>
+                        <span>{T.receiptPreview.driverPaidLine(selectedReceipt.data.driverName || T.receiptPreview.unknownDriver)}</span>
+                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCost.toLocaleString()} {T.common.currency}</span>
                       </div>
                     </div>
                   </div>
@@ -2508,15 +2683,15 @@ export default function App() {
 
                 <div className="border-t border-slate-300 pt-6 flex justify-between text-xs">
                   <div className="text-center w-1/3">
-                    <p className="font-bold mb-6 text-slate-700">توقيع السائق</p>
+                    <p className="font-bold mb-6 text-slate-700">{T.receiptPreview.signDriver}</p>
                     <div className="h-0.5 bg-slate-300 w-24 mx-auto"></div>
                   </div>
                   <div className="text-center w-1/3">
-                    <p className="font-bold mb-6 text-slate-700">إمضاء وختم العميل</p>
+                    <p className="font-bold mb-6 text-slate-700">{T.receiptPreview.signClientStamp}</p>
                     <div className="h-0.5 bg-slate-300 w-24 mx-auto"></div>
                   </div>
                   <div className="text-center w-1/3">
-                    <p className="font-bold mb-6 text-slate-700">اعتماد المسؤول</p>
+                    <p className="font-bold mb-6 text-slate-700">{T.receiptPreview.signManager}</p>
                     <div className="h-0.5 bg-slate-300 w-24 mx-auto"></div>
                   </div>
                 </div>
@@ -2528,13 +2703,13 @@ export default function App() {
                   onClick={() => setIsReceiptOpen(false)}
                   className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-900 rounded-lg text-xs font-semibold cursor-pointer"
                 >
-                  إغلاق المعاينة
+                  {T.receiptPreview.close}
                 </button>
                 <button
                   onClick={handlePrint}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-extrabold cursor-pointer"
                 >
-                  تأكيد وطباعة السند الحالي
+                  {T.receiptPreview.confirmPrint}
                 </button>
               </div>
 

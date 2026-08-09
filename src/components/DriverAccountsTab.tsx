@@ -5,6 +5,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { T } from '../strings';
 import {
   CreditCard,
   Search,
@@ -51,7 +52,7 @@ export function DriverAccountsTab({
     date: new Date().toISOString().split('T')[0],
     driverName: '',
     amount: 50000,
-    paymentType: 'تصفية رحلات',
+    paymentType: T.driverAccounts.payoutTypeSettlement,
     notes: '',
     allocationMode: 'auto' as 'auto' | 'manual' | 'none',
   });
@@ -108,7 +109,7 @@ export function DriverAccountsTab({
       setIsPaymentModalOpen(false);
       onRefreshTrips();
     } catch (err: any) {
-      alert('خطأ أثناء تسوية مستحقات السائق: ' + err.message);
+      alert(T.driverAccounts.saveError(err.message));
     } finally {
       setSubmitting(false);
     }
@@ -142,46 +143,46 @@ export function DriverAccountsTab({
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-slate-800/80 border border-slate-700/60 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-slate-400 text-sm font-medium mb-1">
-            <span>إجمالي أجور السائقين المستحقة</span>
+            <span>{T.driverAccounts.kpiEarned}</span>
             <Truck className="w-4 h-4 text-cyan-400" />
           </div>
           <div className="text-2xl font-bold text-slate-100">
-            {grandTotals.earned.toLocaleString()} <span className="text-xs font-normal text-slate-400">دج</span>
+            {grandTotals.earned.toLocaleString()} <span className="text-xs font-normal text-slate-400">{T.common.currency}</span>
           </div>
-          <div className="text-xs text-slate-400 mt-1">مجموع أجور الرحلات المنفذة</div>
+          <div className="text-xs text-slate-400 mt-1">{T.driverAccounts.kpiEarnedHint}</div>
         </div>
 
         <div className="bg-slate-800/80 border border-emerald-900/40 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-emerald-400 text-sm font-medium mb-1">
-            <span>إجمالي ما تم دفعه للسائقين</span>
+            <span>{T.driverAccounts.kpiPaid}</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-bold text-emerald-300">
-            {grandTotals.paid.toLocaleString()} <span className="text-xs font-normal text-emerald-500">دج</span>
+            {grandTotals.paid.toLocaleString()} <span className="text-xs font-normal text-emerald-500">{T.common.currency}</span>
           </div>
-          <div className="text-xs text-emerald-500/80 mt-1">مبالغ التصفيات والسلف المسلمة فعلياً</div>
+          <div className="text-xs text-emerald-500/80 mt-1">{T.driverAccounts.kpiPaidHint}</div>
         </div>
 
         <div className="bg-slate-800/80 border border-amber-900/40 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-amber-400 text-sm font-medium mb-1">
-            <span>مستحقات معلقة واجبة الدفع</span>
+            <span>{T.driverAccounts.kpiPayable}</span>
             <AlertCircle className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-bold text-amber-300">
-            {grandTotals.payable.toLocaleString()} <span className="text-xs font-normal text-amber-500">دج</span>
+            {grandTotals.payable.toLocaleString()} <span className="text-xs font-normal text-amber-500">{T.common.currency}</span>
           </div>
-          <div className="text-xs text-amber-500/80 mt-1">أجور رحلات غير مصفاة بعد</div>
+          <div className="text-xs text-amber-500/80 mt-1">{T.driverAccounts.kpiPayableHint}</div>
         </div>
 
         <div className="bg-slate-800/80 border border-purple-900/40 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-purple-400 text-sm font-medium mb-1">
-            <span>إجمالي سلف السائقين</span>
+            <span>{T.driverAccounts.kpiAdvance}</span>
             <UserCheck className="w-4 h-4 text-purple-400" />
           </div>
           <div className="text-2xl font-bold text-purple-300">
-            {grandTotals.advance.toLocaleString()} <span className="text-xs font-normal text-purple-500">دج</span>
+            {grandTotals.advance.toLocaleString()} <span className="text-xs font-normal text-purple-500">{T.common.currency}</span>
           </div>
-          <div className="text-xs text-purple-400/80 mt-1">دفعت كسلفة قبل تصفية الرحلات</div>
+          <div className="text-xs text-purple-400/80 mt-1">{T.driverAccounts.kpiAdvanceHint}</div>
         </div>
       </div>
 
@@ -191,7 +192,7 @@ export function DriverAccountsTab({
           <Search className="absolute right-3 top-2.5 w-4 h-4 text-slate-400" />
           <input
             type="text"
-            placeholder="بحث باسم السائق..."
+            placeholder={T.driverAccounts.searchPlaceholder}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 rounded-lg pr-9 pl-4 py-2 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:border-cyan-500"
@@ -209,7 +210,7 @@ export function DriverAccountsTab({
           className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-cyan-950/40"
         >
           <Plus className="w-4 h-4" />
-          تصفية مستحقات / دفع دفعة لسائق
+          {T.driverAccounts.recordPayoutButton}
         </button>
       </div>
 
@@ -219,26 +220,26 @@ export function DriverAccountsTab({
           <table className="w-full text-right text-sm">
             <thead className="bg-slate-900/80 text-slate-300 text-xs font-semibold uppercase tracking-wider border-b border-slate-700">
               <tr>
-                <th className="p-4">اسم السائق</th>
-                <th className="p-4">إجمالي الأجور المستحقة</th>
-                <th className="p-4">إجمالي المدفوع له</th>
-                <th className="p-4">المستحق الحالي (دين الشركة)</th>
-                <th className="p-4">رصيد السلفة</th>
-                <th className="p-4">عدد الرحلات</th>
-                <th className="p-4 text-center">الإجراءات</th>
+                <th className="p-4">{T.driverAccounts.colName}</th>
+                <th className="p-4">{T.driverAccounts.colEarned}</th>
+                <th className="p-4">{T.driverAccounts.colPaid}</th>
+                <th className="p-4">{T.driverAccounts.colPayable}</th>
+                <th className="p-4">{T.driverAccounts.colAdvance}</th>
+                <th className="p-4">{T.driverAccounts.colTripCount}</th>
+                <th className="p-4 text-center">{T.driverAccounts.colActions}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700/50 text-slate-200">
               {loading ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-400">
-                    جاري تحميل حسابات السائقين...
+                    {T.driverAccounts.loading}
                   </td>
                 </tr>
               ) : filteredSummaries.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-400">
-                    لا توجد بيانات حسابات سائقين تطابق البحث.
+                    {T.driverAccounts.empty}
                   </td>
                 </tr>
               ) : (
@@ -251,31 +252,31 @@ export function DriverAccountsTab({
                       {s.driverName}
                     </td>
                     <td className="p-4 font-mono font-medium text-slate-200">
-                      {s.totalEarned.toLocaleString()} دج
+                      {s.totalEarned.toLocaleString()} {T.common.currency}
                     </td>
                     <td className="p-4 font-mono font-semibold text-emerald-400">
-                      {s.totalPaymentsGiven.toLocaleString()} دج
+                      {s.totalPaymentsGiven.toLocaleString()} {T.common.currency}
                     </td>
                     <td className="p-4 font-mono font-semibold">
                       {s.outstandingPayable > 0 ? (
                         <span className="text-amber-400 bg-amber-950/40 border border-amber-800 px-2 py-0.5 rounded text-xs">
-                          {s.outstandingPayable.toLocaleString()} دج
+                          {s.outstandingPayable.toLocaleString()} {T.common.currency}
                         </span>
                       ) : (
-                        <span className="text-emerald-400 text-xs font-normal">مصفى بالكامل</span>
+                        <span className="text-emerald-400 text-xs font-normal">{T.driverAccounts.fullySettled}</span>
                       )}
                     </td>
                     <td className="p-4 font-mono">
                       {s.advanceBalance > 0 ? (
                         <span className="text-purple-400 bg-purple-950/40 border border-purple-800 px-2 py-0.5 rounded text-xs font-semibold">
-                          +{s.advanceBalance.toLocaleString()} دج سلفة
+                          +{s.advanceBalance.toLocaleString()} {T.common.currency} {T.driverAccounts.advanceSuffix}
                         </span>
                       ) : (
-                        <span className="text-slate-500 text-xs">0 دج</span>
+                        <span className="text-slate-500 text-xs">0 {T.common.currency}</span>
                       )}
                     </td>
                     <td className="p-4 text-xs text-slate-300">
-                      <span className="font-bold text-slate-100">{s.totalTripsCount}</span> رحلة ({s.unpaidTripsCount} غير مصفاة)
+                      <span className="font-bold text-slate-100">{s.totalTripsCount}</span> {T.driverAccounts.tripCountCell(s.unpaidTripsCount)}
                     </td>
                     <td className="p-4">
                       <div className="flex items-center justify-center gap-2">
@@ -284,14 +285,14 @@ export function DriverAccountsTab({
                           className="px-3 py-1.5 bg-cyan-900/60 hover:bg-cyan-800 text-cyan-200 border border-cyan-700/60 rounded text-xs font-medium transition-colors flex items-center gap-1"
                         >
                           <CreditCard className="w-3.5 h-3.5" />
-                          تصفية / دفع
+                          {T.driverAccounts.payoutAction}
                         </button>
                         <button
                           onClick={() => openStatementForDriver(s.driverName)}
                           className="px-3 py-1.5 bg-slate-700/70 hover:bg-slate-600 text-slate-200 border border-slate-600 rounded text-xs font-medium transition-colors flex items-center gap-1"
                         >
                           <FileText className="w-3.5 h-3.5" />
-                          كشف حساب
+                          {T.driverAccounts.statementAction}
                         </button>
                       </div>
                     </td>
@@ -310,7 +311,7 @@ export function DriverAccountsTab({
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-cyan-400 font-bold text-lg">
                 <CreditCard className="w-5 h-5" />
-                تصفية مستحقات / دفع للسائق
+                {T.driverAccounts.payoutModalTitle}
               </div>
               <button
                 onClick={() => setIsPaymentModalOpen(false)}
@@ -323,7 +324,7 @@ export function DriverAccountsTab({
             <form onSubmit={handlePayoutSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">رقم الوصل</label>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.driverAccounts.fieldReceiptNo}</label>
                   <input
                     type="text"
                     value={payoutForm.id}
@@ -333,7 +334,7 @@ export function DriverAccountsTab({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">التاريخ</label>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.driverAccounts.fieldDate}</label>
                   <input
                     type="date"
                     value={payoutForm.date}
@@ -345,10 +346,10 @@ export function DriverAccountsTab({
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">اسم السائق</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.driverAccounts.fieldDriverName}</label>
                 <input
                   type="text"
-                  placeholder="أدخل اسم السائق"
+                  placeholder={T.driverAccounts.fieldDriverNamePlaceholder}
                   value={payoutForm.driverName}
                   onChange={e => setPayoutForm({ ...payoutForm, driverName: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold"
@@ -358,7 +359,7 @@ export function DriverAccountsTab({
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">المبلغ المدفوع (دج)</label>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.driverAccounts.fieldAmount}</label>
                   <input
                     type="number"
                     min={1}
@@ -369,21 +370,21 @@ export function DriverAccountsTab({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">نوع الدفعة</label>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.driverAccounts.fieldPayoutType}</label>
                   <select
                     value={payoutForm.paymentType}
                     onChange={e => setPayoutForm({ ...payoutForm, paymentType: e.target.value })}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
                   >
-                    <option value="تصفية رحلات">تصفية رحلات</option>
-                    <option value="سلفة">سلفة</option>
-                    <option value="مكافأة">مكافأة</option>
+                    <option value={T.driverAccounts.payoutTypeSettlement}>{T.driverAccounts.payoutTypeSettlement}</option>
+                    <option value={T.driverAccounts.payoutTypeAdvance}>{T.driverAccounts.payoutTypeAdvance}</option>
+                    <option value={T.driverAccounts.payoutTypeBonus}>{T.driverAccounts.payoutTypeBonus}</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-2">طريقة تطبيق التصفية</label>
+                <label className="block text-xs font-medium text-slate-300 mb-2">{T.driverAccounts.allocationLabel}</label>
                 <div className="grid grid-cols-2 gap-3">
                   <label className={`p-3 border rounded-xl cursor-pointer flex flex-col gap-1 transition-all ${
                     payoutForm.allocationMode === 'auto'
@@ -398,9 +399,9 @@ export function DriverAccountsTab({
                         onChange={() => setPayoutForm({ ...payoutForm, allocationMode: 'auto' })}
                         className="accent-cyan-500"
                       />
-                      تلقائي (تصفية أقدم الرحلات)
+                      {T.driverAccounts.allocationAuto}
                     </div>
-                    <span className="text-[11px] opacity-80">تطبيق الدفعة لتصفية أجور الرحلات القديمة أولاً</span>
+                    <span className="text-[11px] opacity-80">{T.driverAccounts.allocationAutoHint}</span>
                   </label>
 
                   <label className={`p-3 border rounded-xl cursor-pointer flex flex-col gap-1 transition-all ${
@@ -416,18 +417,18 @@ export function DriverAccountsTab({
                         onChange={() => setPayoutForm({ ...payoutForm, allocationMode: 'none' })}
                         className="accent-purple-500"
                       />
-                      تسجيل كسلفة مسبقة
+                      {T.driverAccounts.allocationNone}
                     </div>
-                    <span className="text-[11px] opacity-80">تسجيل المبلغ كسلفة على السائق دون تصفية رحلات سابقة</span>
+                    <span className="text-[11px] opacity-80">{T.driverAccounts.allocationNoneHint}</span>
                   </label>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">ملاحظات / تفاصيل</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.driverAccounts.fieldNotes}</label>
                 <textarea
                   rows={2}
-                  placeholder="ملاحظات عن التصفية..."
+                  placeholder={T.driverAccounts.fieldNotesPlaceholder}
                   value={payoutForm.notes}
                   onChange={e => setPayoutForm({ ...payoutForm, notes: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
@@ -440,14 +441,14 @@ export function DriverAccountsTab({
                   onClick={() => setIsPaymentModalOpen(false)}
                   className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium"
                 >
-                  إلغاء
+                  {T.driverAccounts.cancel}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-cyan-950/50 flex items-center gap-2"
                 >
-                  {submitting ? 'جاري التسجيل...' : 'حفظ وتأكيد التصفية'}
+                  {submitting ? T.driverAccounts.saving : T.driverAccounts.save}
                 </button>
               </div>
             </form>
@@ -462,7 +463,7 @@ export function DriverAccountsTab({
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-800/80">
               <div className="flex items-center gap-2 text-cyan-400 font-bold text-lg">
                 <FileText className="w-5 h-5" />
-                كشف حساب أجور ومستحقات السائق: <span className="text-slate-100">{statementData?.driverName}</span>
+                {T.driverAccounts.statementTitle} <span className="text-slate-100">{statementData?.driverName}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -470,7 +471,7 @@ export function DriverAccountsTab({
                   className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1"
                 >
                   <Printer className="w-4 h-4" />
-                  طباعة الكشف
+                  {T.driverAccounts.printButton}
                 </button>
                 <button
                   onClick={() => setIsStatementModalOpen(false)}
@@ -483,28 +484,28 @@ export function DriverAccountsTab({
 
             <div className="p-6 space-y-6 overflow-y-auto flex-1 text-slate-200">
               {loadingStatement ? (
-                <div className="p-12 text-center text-slate-400">جاري تحميل بيانات كشف حساب السائق...</div>
+                <div className="p-12 text-center text-slate-400">{T.driverAccounts.statementLoading}</div>
               ) : !statementData ? (
-                <div className="p-12 text-center text-slate-400">لم يتم العثور على بيانات لهذا السائق.</div>
+                <div className="p-12 text-center text-slate-400">{T.driverAccounts.statementEmpty}</div>
               ) : (
                 <>
                   {/* Statement Summary Cards */}
                   <div className="grid grid-cols-4 gap-3 bg-slate-800/60 p-4 rounded-xl border border-slate-700/60">
                     <div>
-                      <div className="text-xs text-slate-400">إجمالي الأجور المستحقة</div>
-                      <div className="text-lg font-bold text-slate-100">{statementData.summary.totalEarned.toLocaleString()} دج</div>
+                      <div className="text-xs text-slate-400">{T.driverAccounts.stmtTotalEarned}</div>
+                      <div className="text-lg font-bold text-slate-100">{statementData.summary.totalEarned.toLocaleString()} {T.common.currency}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-400">إجمالي المدفوع له فعلياً</div>
-                      <div className="text-lg font-bold text-emerald-400">{statementData.summary.totalPaymentsGiven.toLocaleString()} دج</div>
+                      <div className="text-xs text-slate-400">{T.driverAccounts.stmtTotalPaid}</div>
+                      <div className="text-lg font-bold text-emerald-400">{statementData.summary.totalPaymentsGiven.toLocaleString()} {T.common.currency}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-400">المستحق المعلق (دين الشركة)</div>
-                      <div className="text-lg font-bold text-amber-400">{statementData.summary.outstandingPayable.toLocaleString()} دج</div>
+                      <div className="text-xs text-slate-400">{T.driverAccounts.stmtOutstanding}</div>
+                      <div className="text-lg font-bold text-amber-400">{statementData.summary.outstandingPayable.toLocaleString()} {T.common.currency}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-400">رصيد السلفة المتبقي</div>
-                      <div className="text-lg font-bold text-purple-400">{statementData.summary.advanceBalance.toLocaleString()} دج</div>
+                      <div className="text-xs text-slate-400">{T.driverAccounts.stmtAdvance}</div>
+                      <div className="text-lg font-bold text-purple-400">{statementData.summary.advanceBalance.toLocaleString()} {T.common.currency}</div>
                     </div>
                   </div>
 
@@ -512,20 +513,20 @@ export function DriverAccountsTab({
                   <div>
                     <h4 className="font-bold text-slate-200 mb-3 flex items-center gap-2 text-sm">
                       <Truck className="w-4 h-4 text-cyan-400" />
-                      سجل الرحلات والأجور المكتسبة ({statementData.itemizedTrips.length})
+                      {T.driverAccounts.stmtTripsHeading(statementData.itemizedTrips.length)}
                     </h4>
                     <div className="border border-slate-700 rounded-lg overflow-hidden">
                       <table className="w-full text-right text-xs">
                         <thead className="bg-slate-800 text-slate-300 font-semibold border-b border-slate-700">
                           <tr>
-                            <th className="p-2.5">التاريخ</th>
-                            <th className="p-2.5">نوع الرحلة</th>
-                            <th className="p-2.5">رقم الرحلة</th>
-                            <th className="p-2.5">العميل / الوجهة</th>
-                            <th className="p-2.5">الحمولة</th>
-                            <th className="p-2.5">حق السائق (الأجر)</th>
-                            <th className="p-2.5">المدفوع له</th>
-                            <th className="p-2.5">المتبقي له</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColDate}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColType}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColId}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColClientDest}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColLoad}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColEarned}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColPaid}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColRemaining}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
@@ -534,21 +535,21 @@ export function DriverAccountsTab({
                               <td className="p-2.5 font-mono text-slate-400">{item.date}</td>
                               <td className="p-2.5 font-medium">
                                 {item.type === 'transport' ? (
-                                  <span className="text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded">نقل</span>
+                                  <span className="text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded">{T.driverAccounts.typeTransport}</span>
                                 ) : (
-                                  <span className="text-blue-400 bg-blue-950/40 px-1.5 py-0.5 rounded">توصيل مواد</span>
+                                  <span className="text-blue-400 bg-blue-950/40 px-1.5 py-0.5 rounded">{T.driverAccounts.typeResale}</span>
                                 )}
                               </td>
                               <td className="p-2.5 font-mono font-bold text-slate-200">{item.id}</td>
                               <td className="p-2.5">{item.clientName} ➔ {item.destination}</td>
                               <td className="p-2.5">{item.totalTonnage} {item.quantityUnit}</td>
-                              <td className="p-2.5 font-mono font-bold text-cyan-300">{item.driverEarned.toLocaleString()} دج</td>
-                              <td className="p-2.5 font-mono text-emerald-400">{item.driverPaid.toLocaleString()} دج</td>
+                              <td className="p-2.5 font-mono font-bold text-cyan-300">{item.driverEarned.toLocaleString()} {T.common.currency}</td>
+                              <td className="p-2.5 font-mono text-emerald-400">{item.driverPaid.toLocaleString()} {T.common.currency}</td>
                               <td className="p-2.5 font-mono font-semibold">
                                 {item.remaining > 0 ? (
-                                  <span className="text-amber-400">{item.remaining.toLocaleString()} دج</span>
+                                  <span className="text-amber-400">{item.remaining.toLocaleString()} {T.common.currency}</span>
                                 ) : (
-                                  <span className="text-emerald-400">0 دج</span>
+                                  <span className="text-emerald-400">0 {T.common.currency}</span>
                                 )}
                               </td>
                             </tr>
@@ -562,23 +563,23 @@ export function DriverAccountsTab({
                   <div>
                     <h4 className="font-bold text-slate-200 mb-3 flex items-center gap-2 text-sm">
                       <CreditCard className="w-4 h-4 text-cyan-400" />
-                      سجل التصفيات والسلف المسلمة للسائق ({statementData.payments.length})
+                      {T.driverAccounts.stmtPayoutsHeading(statementData.payments.length)}
                     </h4>
                     <div className="border border-slate-700 rounded-lg overflow-hidden">
                       <table className="w-full text-right text-xs">
                         <thead className="bg-slate-800 text-slate-300 font-semibold border-b border-slate-700">
                           <tr>
-                            <th className="p-2.5">رقم الوصل</th>
-                            <th className="p-2.5">التاريخ</th>
-                            <th className="p-2.5">نوع الدفعة</th>
-                            <th className="p-2.5">المبلغ</th>
-                            <th className="p-2.5">ملاحظات</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtPayColReceipt}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColDate}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtPayColType}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtPayColAmount}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtPayColNotes}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
                           {statementData.payments.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="p-4 text-center text-slate-500">لا توجد تصفيات أو سلف مسجلة بعد.</td>
+                              <td colSpan={5} className="p-4 text-center text-slate-500">{T.driverAccounts.stmtNoPayouts}</td>
                             </tr>
                           ) : (
                             statementData.payments.map((p, idx) => (
@@ -586,7 +587,7 @@ export function DriverAccountsTab({
                                 <td className="p-2.5 font-mono font-bold text-cyan-300">{p.id}</td>
                                 <td className="p-2.5 font-mono text-slate-400">{p.date}</td>
                                 <td className="p-2.5 font-medium">{p.paymentType}</td>
-                                <td className="p-2.5 font-mono font-bold text-emerald-400">{p.amount.toLocaleString()} دج</td>
+                                <td className="p-2.5 font-mono font-bold text-emerald-400">{p.amount.toLocaleString()} {T.common.currency}</td>
                                 <td className="p-2.5 text-slate-400">{p.notes || '-'}</td>
                               </tr>
                             ))
@@ -611,80 +612,80 @@ export function DriverAccountsTab({
         <div className="hidden print-statement-container">
           <div style={{ maxWidth: '700px', margin: '0 auto', fontFamily: 'sans-serif' }}>
             <div style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '12px', marginBottom: '16px' }}>
-              <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px' }}>نقل وتوزيع البضائع لعلاوي عبد المالك</h1>
-              <p style={{ fontSize: '11px', margin: '0 0 4px', color: '#666' }}>كشف حساب أجور ومستحقات السائق</p>
-              <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0' }}>السائق: {statementData.driverName}</p>
-              <p style={{ fontSize: '10px', margin: '4px 0 0', color: '#888' }}>تاريخ الطباعة: {new Date().toLocaleDateString('ar-DZ')}</p>
+              <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px' }}>{T.brand.companyName}</h1>
+              <p style={{ fontSize: '11px', margin: '0 0 4px', color: '#666' }}>{T.driverAccounts.printTitle}</p>
+              <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0' }}>{T.driverAccounts.printDriverLabel} {statementData.driverName}</p>
+              <p style={{ fontSize: '10px', margin: '4px 0 0', color: '#888' }}>{T.printCommon.printDateLabel} {new Date().toLocaleDateString('ar-DZ')}</p>
             </div>
 
             <table style={{ width: '100%', marginBottom: '16px', fontSize: '11px' }}>
               <tbody>
                 <tr>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>إجمالي الأجور المستحقة</td>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.totalEarned.toLocaleString()} دج</td>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>إجمالي المدفوع</td>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.totalPaymentsGiven.toLocaleString()} دج</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>{T.driverAccounts.printSummaryEarned}</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.totalEarned.toLocaleString()} {T.common.currency}</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>{T.driverAccounts.printSummaryPaid}</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.totalPaymentsGiven.toLocaleString()} {T.common.currency}</td>
                 </tr>
                 <tr>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>المستحق المعلق</td>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.outstandingPayable.toLocaleString()} دج</td>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>رصيد السلفة</td>
-                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.advanceBalance.toLocaleString()} دج</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>{T.driverAccounts.printSummaryOutstanding}</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.outstandingPayable.toLocaleString()} {T.common.currency}</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc', fontWeight: 'bold' }}>{T.driverAccounts.printSummaryAdvance}</td>
+                  <td style={{ padding: '4px 8px', border: '1px solid #ccc' }}>{statementData.summary.advanceBalance.toLocaleString()} {T.common.currency}</td>
                 </tr>
               </tbody>
             </table>
 
-            <h3 style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>سجل الرحلات والأجور ({statementData.itemizedTrips.length})</h3>
+            <h3 style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>{T.driverAccounts.printTripsHeading(statementData.itemizedTrips.length)}</h3>
             <table>
               <thead>
                 <tr>
-                  <th>التاريخ</th>
-                  <th>النوع</th>
-                  <th>الرقم</th>
-                  <th>العميل / الوجهة</th>
-                  <th>الحمولة</th>
-                  <th>الأجر</th>
-                  <th>المدفوع</th>
-                  <th>المتبقي</th>
+                  <th>{T.driverAccounts.stmtColDate}</th>
+                  <th>{T.driverAccounts.printColType}</th>
+                  <th>{T.driverAccounts.printColId}</th>
+                  <th>{T.driverAccounts.stmtColClientDest}</th>
+                  <th>{T.driverAccounts.stmtColLoad}</th>
+                  <th>{T.driverAccounts.printColEarned}</th>
+                  <th>{T.driverAccounts.printColPaid}</th>
+                  <th>{T.driverAccounts.printColRemaining}</th>
                 </tr>
               </thead>
               <tbody>
                 {statementData.itemizedTrips.map((item, idx) => (
                   <tr key={idx}>
                     <td>{item.date}</td>
-                    <td>{item.type === 'transport' ? 'نقل' : 'توصيل'}</td>
+                    <td>{item.type === 'transport' ? T.driverAccounts.typeTransport : T.driverAccounts.printTypeResale}</td>
                     <td>{item.id}</td>
                     <td>{item.clientName} ← {item.destination}</td>
                     <td>{item.totalTonnage} {item.quantityUnit}</td>
-                    <td>{item.driverEarned.toLocaleString()} دج</td>
-                    <td>{item.driverPaid.toLocaleString()} دج</td>
-                    <td style={{ fontWeight: item.remaining > 0 ? 'bold' : 'normal' }}>{item.remaining.toLocaleString()} دج</td>
+                    <td>{item.driverEarned.toLocaleString()} {T.common.currency}</td>
+                    <td>{item.driverPaid.toLocaleString()} {T.common.currency}</td>
+                    <td style={{ fontWeight: item.remaining > 0 ? 'bold' : 'normal' }}>{item.remaining.toLocaleString()} {T.common.currency}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
-            <h3 style={{ fontSize: '12px', fontWeight: 'bold', margin: '16px 0 6px' }}>سجل التصفيات والسلف ({statementData.payments.length})</h3>
+            <h3 style={{ fontSize: '12px', fontWeight: 'bold', margin: '16px 0 6px' }}>{T.driverAccounts.printPayoutsHeading(statementData.payments.length)}</h3>
             <table>
               <thead>
                 <tr>
-                  <th>رقم الوصل</th>
-                  <th>التاريخ</th>
-                  <th>نوع الدفعة</th>
-                  <th>المبلغ</th>
-                  <th>ملاحظات</th>
+                  <th>{T.driverAccounts.stmtPayColReceipt}</th>
+                  <th>{T.driverAccounts.stmtColDate}</th>
+                  <th>{T.driverAccounts.stmtPayColType}</th>
+                  <th>{T.driverAccounts.stmtPayColAmount}</th>
+                  <th>{T.driverAccounts.stmtPayColNotes}</th>
                 </tr>
               </thead>
               <tbody>
                 {statementData.payments.length === 0 ? (
-                  <tr><td colSpan={5} style={{ textAlign: 'center' }}>لا توجد تصفيات مسجلة بعد</td></tr>
+                  <tr><td colSpan={5} style={{ textAlign: 'center' }}>{T.driverAccounts.printNoPayouts}</td></tr>
                 ) : (
                   statementData.payments.map((p, idx) => (
                     <tr key={idx}>
                       <td>{p.id}</td>
                       <td>{p.date}</td>
                       <td>{p.paymentType}</td>
-                      <td>{p.amount.toLocaleString()} دج</td>
+                      <td>{p.amount.toLocaleString()} {T.common.currency}</td>
                       <td>{p.notes || '-'}</td>
                     </tr>
                   ))
@@ -694,13 +695,13 @@ export function DriverAccountsTab({
 
             <div style={{ marginTop: '40px', display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
               <div style={{ textAlign: 'center', width: '30%' }}>
-                <p style={{ fontWeight: 'bold', marginBottom: '30px' }}>توقيع السائق</p>
+                <p style={{ fontWeight: 'bold', marginBottom: '30px' }}>{T.driverAccounts.printSignDriver}</p>
                 <div style={{ borderTop: '1px solid #999', width: '120px', margin: '0 auto' }}></div>
               </div>
               <div style={{ textAlign: 'center', width: '30%' }}>
-                <p style={{ fontWeight: 'bold', marginBottom: '30px' }}>صادق عليها المسؤول</p>
+                <p style={{ fontWeight: 'bold', marginBottom: '30px' }}>{T.printCommon.approvedBy}</p>
                 <div style={{ borderTop: '1px solid #999', width: '120px', margin: '0 auto' }}></div>
-                <p style={{ fontSize: '9px', marginTop: '4px', color: '#888' }}>لعلاوي عبد المالك</p>
+                <p style={{ fontSize: '9px', marginTop: '4px', color: '#888' }}>{T.brand.signatureName}</p>
               </div>
             </div>
           </div>

@@ -37,6 +37,32 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 }
 
 // ──────────────────────────────────────────
+// Build identity / diagnostics
+// ──────────────────────────────────────────
+
+export interface AppInfo {
+  appVersion: string;
+  buildId: string;
+  buildTime: string | null;
+  gitCommit: string | null;
+  databaseFile: string;
+  recordCounts: Record<string, number>;
+}
+
+/**
+ * Which build is running and which database file it opened.
+ *
+ * Uses its own fetch rather than request<T>(): /api/health answers with a flat
+ * object, not the { success, data } envelope request() unwraps, so going
+ * through it would return undefined.
+ */
+export async function fetchAppInfo(): Promise<AppInfo> {
+  const res = await fetch(`${BASE_URL}/health`);
+  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+  return res.json();
+}
+
+// ──────────────────────────────────────────
 // Client Transport Trips
 // ──────────────────────────────────────────
 
@@ -227,6 +253,17 @@ export async function importBackup(backup: any): Promise<{ imported: Record<stri
   return request('/backup/import', {
     method: 'POST',
     body: JSON.stringify({ confirm: true, tables: backup?.tables }),
+  });
+}
+
+/**
+ * Permanently deletes every business record, leaving an empty database.
+ * Irreversible — the caller must confirm with the user first.
+ */
+export async function resetAllData(): Promise<{ deleted: Record<string, number>; total: number }> {
+  return request('/backup/reset', {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
   });
 }
 

@@ -13,6 +13,19 @@ const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
 const router = (0, express_1.Router)();
 /**
+ * What a driver is owed for one resale.
+ *
+ * driver_cost is the wage for a SINGLE trip; trip_count says how many trips
+ * the delivery actually took. Kept in one place because the same figure is
+ * needed by the summary, the statement and the FIFO allocation query, and
+ * they must never disagree about what is owed.
+ */
+function resaleDriverWage(row) {
+    return Math.max(1, row.trip_count ?? 1) * row.driver_cost;
+}
+/** SQL equivalent of resaleDriverWage(), for queries that cannot use it. */
+const RESALE_DRIVER_WAGE_SQL = 'MAX(1, COALESCE(trip_count, 1)) * driver_cost';
+/**
  * Helper: Recalculate trip/resale driver_paid from allocations table
  */
 function syncTripDriverPaid(tripType, tripId) {
@@ -111,8 +124,10 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
         const resales = database_1.default.prepare('SELECT * FROM material_resales WHERE driver_name = ?').all(name);
         let resaleEarned = 0;
         let resalePaid = 0;
+        // driver_cost is the wage for ONE trip, so a multi-trip delivery earns
+        // that wage once per trip.
         resales.forEach(r => {
-            resaleEarned += r.driver_cost;
+            resaleEarned += resaleDriverWage(r);
             resalePaid += (r.driver_paid ?? 0);
         });
         const totalEarned = transportEarned + resaleEarned;
@@ -124,7 +139,7 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
         const outstandingPayable = Math.max(0, totalEarned - totalPaymentsGiven);
         const totalTripsCount = trips.length + resales.length;
         const unpaidTripsCount = trips.filter(t => (t.driver_paid ?? 0) < t.driver_cut).length +
-            resales.filter(r => (r.driver_paid ?? 0) < r.driver_cost).length;
+            resales.filter(r => (r.driver_paid ?? 0) < resaleDriverWage(r)).length;
         return {
             driverName: name,
             totalEarned,
@@ -169,9 +184,9 @@ router.get('/statement/:driverName', (0, error_handler_1.asyncHandler)(async (re
             materialType: r.material_type,
             totalTonnage: r.total_tonnage,
             quantityUnit: r.quantity_unit ?? 'طن',
-            driverEarned: r.driver_cost,
+            driverEarned: resaleDriverWage(r),
             driverPaid: r.driver_paid ?? 0,
-            remaining: r.driver_cost - (r.driver_paid ?? 0)
+            remaining: resaleDriverWage(r) - (r.driver_paid ?? 0)
         }))
     ].sort((a, b) => b.date.localeCompare(a.date));
     const totalEarned = itemizedTrips.reduce((sum, item) => sum + item.driverEarned, 0);
@@ -248,9 +263,9 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
         ORDER BY date ASC
       `).all(driverName);
             const resales = database_1.default.prepare(`
-        SELECT id, 'resale' as trip_type, date, driver_cost as total_wage, driver_paid
+        SELECT id, 'resale' as trip_type, date, ${RESALE_DRIVER_WAGE_SQL} as total_wage, driver_paid
         FROM material_resales
-        WHERE driver_name = ? AND driver_paid < driver_cost
+        WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL}
         ORDER BY date ASC
       `).all(driverName);
             const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
