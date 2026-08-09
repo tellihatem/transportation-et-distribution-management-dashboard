@@ -700,8 +700,21 @@ export const T = {
     sourcingCostLabel: "تكلفة شراء البضاعة (الكمية × سعر الوحدة):",
     unitSellingPrice: "سعر البيع للزبون (للوحدة دج)",
     unitSellingPricePlaceholder: "سعر بيع الوحدة الواحدة",
-    totalSellingPrice: "السعر البيعي الإجمالي للزبون",
-    totalSellingPricePlaceholder: "ثمن المادة + ثمن خدمات الشحن ككل",
+
+    /* --- Goods section of the resale form --- */
+    /** Heading of the section covering the goods themselves. */
+    goodsSectionTitle: "حساب البضاعة",
+    /** Purchase price per unit × quantity — what the goods cost us. */
+    totalBuyCostLabel: "تكلفة الشراء الإجمالية:",
+    /** Selling price per unit × quantity — what the client pays for goods. */
+    totalSellRevenueLabel: "إجمالي البيع:",
+    /** Sell revenue minus buy cost: what the goods alone earn. */
+    grossProductProfitLabel: "مجمل ربح البضاعة:",
+
+    /* --- Final profit summary (its own section, not inside transport) --- */
+    profitSummaryTitle: "الملخص النهائي للربح",
+    /** The amount billed to the client: goods + transport. Never typed in. */
+    invoiceTotalLabel: "إجمالي الفاتورة للزبون:",
     /** Logistics cost box for a resale. */
     logisticsTitle: "تحليل تحليل التكلفة اللوجستية",
     resaleDriverCost: "كلفة السائق",
@@ -761,6 +774,13 @@ export const T = {
      *  per-trip figure is printed, because there is no exact one and money is
      *  never rounded on an invoice — only the number of trips is stated. */
     deliveryPriceTripsOnly: (trips: number) => `سعر النقل والتوصيل (${trips} رحلات)`,
+    /** Title of the delivery line on a resale invoice; the line beneath it
+     *  reads "<trips> رحلة × <price per trip>". */
+    transportLineTitle: "خدمات النقل والتوصيل",
+    /** Unit word after the number of trips on that line. */
+    tripsUnit: "رحلة",
+    /** Used as the goods line title when no material type was recorded. */
+    goodsLineFallback: "البضاعة",
     /** Single price line on a plain transport invoice. */
     transportPriceLabel: "سعر النقل",
     grandTotalLabel: "المبلغ الإجمالي الواجب دفعه",

@@ -11,6 +11,7 @@ const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
+const resale_math_1 = require("../resale-math");
 const router = (0, express_1.Router)();
 /**
  * GET /api/resales — List all resale transactions with optional filters
@@ -65,24 +66,30 @@ router.get('/stats', (0, error_handler_1.asyncHandler)(async (req, res) => {
         params.push(dateEnd);
     }
     const rows = database_1.default.prepare(sql).all(...params);
-    let tradingTurnover = 0;
-    let capitalOutlay = 0;
-    let totalTrueProfit = 0;
+    let tradingTurnover = 0; // total invoiced to clients (goods + transport)
+    let capitalOutlay = 0; // what the goods cost us
+    let grossProductProfit = 0; // goods margin, before any transport
+    let transportTotal = 0; // trips × cost per trip
+    let hiddenProfit = 0;
+    let totalTrueProfit = 0; // net real profit
     let totalTons = 0;
     rows.forEach((row) => {
-        const sourcingCost = row.factory_purchase_price * row.total_tonnage;
-        // truck_cost / driver_cost / explicit_profit describe ONE trip, so a job
-        // needing several trips costs (and earns) that many times over.
-        const trips = Math.max(1, row.trip_count ?? 1);
-        const visibleTransportFee = trips * (row.truck_cost + row.driver_cost + row.explicit_profit);
-        const hiddenMargin = row.client_selling_price - (sourcingCost + visibleTransportFee);
-        const trueProfit = trips * row.explicit_profit + hiddenMargin;
-        tradingTurnover += row.client_selling_price;
-        capitalOutlay += sourcingCost;
-        totalTrueProfit += trueProfit;
+        const m = (0, resale_math_1.calcResale)(mapRowToResale(row));
+        tradingTurnover += m.invoiceTotal;
+        capitalOutlay += m.totalBuyCost;
+        grossProductProfit += m.grossProductProfit;
+        transportTotal += m.transportTotal;
+        hiddenProfit += m.hiddenProfit;
+        totalTrueProfit += m.netRealProfit;
         totalTons += row.total_tonnage;
     });
-    res.json({ success: true, data: { tradingTurnover, capitalOutlay, totalTrueProfit, totalTons } });
+    res.json({
+        success: true,
+        data: {
+            tradingTurnover, capitalOutlay, grossProductProfit,
+            transportTotal, hiddenProfit, totalTrueProfit, totalTons,
+        },
+    });
 }));
 /**
  * GET /api/resales/next-id — Next sequential resale ID (RS-1, RS-2, ...)
@@ -108,7 +115,7 @@ router.get('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * POST /api/resales — Create new resale
  */
 router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const { id, date, endClient, destination, materialType, originFactory, factoryPurchasePrice, totalTonnage, quantityUnit, clientSellingPrice, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
+    const { id, date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
     if (!id || !date || !endClient) {
         throw (0, error_handler_1.createApiError)('Missing required fields: id, date, endClient', 400, 'VALIDATION_ERROR');
     }
@@ -116,10 +123,23 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     if (existing) {
         throw (0, error_handler_1.createApiError)('Resale ID already exists', 409, 'DUPLICATE_ID');
     }
+    // The invoice total is never accepted from the client: it is derived from
+    // the goods and transport figures, so the two invoice lines always add up
+    // to the amount the ledgers settle against.
+    const trips = (0, resale_math_1.resaleTripCount)({ tripCount });
+    const invoiceTotal = (0, resale_math_1.calcInvoiceTotal)({
+        factoryPurchasePrice: factoryPurchasePrice || 0,
+        productUnitPrice: productUnitPrice || 0,
+        totalTonnage: totalTonnage || 0,
+        truckCost: truckCost || 0,
+        driverCost: driverCost || 0,
+        explicitProfit: explicitProfit || 0,
+        tripCount: trips,
+    });
     database_1.default.prepare(`
-    INSERT INTO material_resales (id, date, end_client, destination, material_type, origin_factory, factory_purchase_price, total_tonnage, quantity_unit, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, trip_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice || 0, totalTonnage || 0, quantityUnit || 'طن', clientSellingPrice || 0, truckCost || 0, driverCost || 0, explicitProfit || 0, driverName || '', Math.max(1, Number(tripCount) || 1));
+    INSERT INTO material_resales (id, date, end_client, destination, material_type, origin_factory, factory_purchase_price, product_unit_price, total_tonnage, quantity_unit, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, trip_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice || 0, productUnitPrice || 0, totalTonnage || 0, quantityUnit || 'طن', invoiceTotal, truckCost || 0, driverCost || 0, explicitProfit || 0, driverName || '', trips);
     const created = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(id);
     (0, replicator_1.queueSync)('material_resales', id, 'upsert', created);
     res.status(201).json({ success: true, data: mapRowToResale(created) });
@@ -131,15 +151,20 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Resale not found', 404, 'NOT_FOUND');
-    const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, totalTonnage, quantityUnit, clientSellingPrice, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
+    const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
+    const trips = (0, resale_math_1.resaleTripCount)({ tripCount });
+    const invoiceTotal = (0, resale_math_1.calcInvoiceTotal)({
+        factoryPurchasePrice, productUnitPrice: productUnitPrice || 0,
+        totalTonnage, truckCost, driverCost, explicitProfit, tripCount: trips,
+    });
     database_1.default.prepare(`
     UPDATE material_resales SET
-      date = ?, end_client = ?, destination = ?, material_type = ?, origin_factory = ?, factory_purchase_price = ?, total_tonnage = ?, quantity_unit = ?,
+      date = ?, end_client = ?, destination = ?, material_type = ?, origin_factory = ?, factory_purchase_price = ?, product_unit_price = ?, total_tonnage = ?, quantity_unit = ?,
       client_selling_price = ?, truck_cost = ?, driver_cost = ?,
       explicit_profit = ?, driver_name = ?, trip_count = ?,
       updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice, totalTonnage, quantityUnit || 'طن', clientSellingPrice, truckCost, driverCost, explicitProfit, driverName || '', Math.max(1, Number(tripCount) || 1), req.params.id);
+  `).run(date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice, productUnitPrice || 0, totalTonnage, quantityUnit || 'طن', invoiceTotal, truckCost, driverCost, explicitProfit, driverName || '', trips, req.params.id);
     const updated = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
     (0, replicator_1.queueSync)('material_resales', req.params.id, 'upsert', updated);
     res.json({ success: true, data: mapRowToResale(updated) });
@@ -167,6 +192,7 @@ function mapRowToResale(row) {
         materialType: row.material_type ?? '',
         originFactory: row.origin_factory ?? '',
         factoryPurchasePrice: row.factory_purchase_price,
+        productUnitPrice: row.product_unit_price ?? 0,
         totalTonnage: row.total_tonnage,
         quantityUnit: row.quantity_unit ?? 'طن',
         clientSellingPrice: row.client_selling_price,

@@ -37,6 +37,7 @@ import {
 } from 'recharts';
 import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary } from '../types';
 import { T } from '../strings';
+import { calcResale } from '../../server/resale-math';
 
 interface ExecutiveOverviewTabProps {
   trips: ClientTransportTrip[];
@@ -83,19 +84,15 @@ export function ExecutiveOverviewTab({
     let resaleTons = 0;
 
     resales.forEach(r => {
-      const sourcingCost = (r.factoryPurchasePrice || 0) * (r.totalTonnage || 0);
-      // Transport costs are per trip, so a delivery split over several trips
-      // incurs the truck rent, the driver's wage and the profit once each.
-      const trips = Math.max(1, r.tripCount || 1);
-      const visibleTransportFee = trips * ((r.truckCost || 0) + (r.driverCost || 0) + (r.explicitProfit || 0));
-      const hiddenMargin = (r.clientSellingPrice || 0) - (sourcingCost + visibleTransportFee);
-      const trueProfit = trips * (r.explicitProfit || 0) + hiddenMargin;
+      // Same shared calculation the modal and the invoice use, so this
+      // dashboard can never quote a different profit from the record itself.
+      const m = calcResale(r);
 
-      resaleInvoiced += (r.clientSellingPrice || 0);
-      resaleSourcingCosts += sourcingCost;
-      resaleDriverWages += trips * (r.driverCost || 0);
-      resaleLogisticsCosts += trips * (r.truckCost || 0);
-      resaleTrueProfit += trueProfit;
+      resaleInvoiced += m.invoiceTotal;
+      resaleSourcingCosts += m.totalBuyCost;
+      resaleDriverWages += m.trips * (r.driverCost || 0);
+      resaleLogisticsCosts += m.trips * (r.truckCost || 0);
+      resaleTrueProfit += m.netRealProfit;
       resaleTons += (r.totalTonnage || 0);
     });
 

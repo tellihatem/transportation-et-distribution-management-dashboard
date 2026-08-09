@@ -65,6 +65,7 @@ import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
 import logoUrl from "../assets/canvas.png";
 import { T } from "./strings";
+import { calcResale } from "../server/resale-math";
 
 // Algerian French-loanword month names, matching the receipt's existing date convention
 const ALGERIAN_MONTHS = T.calendar.months;
@@ -76,23 +77,6 @@ function formatAlgerianDate(d: Date): string {
 // Suggested units for the quantity field. The input is free-text, so anything
 // else can be typed in — these are just the common ones.
 const QUANTITY_UNITS = T.units.suggestions;
-
-// A resale's truck rent, driver wage and declared profit are all PER TRIP.
-// These two helpers keep every screen agreeing on how the trip count scales
-// them, rather than each one repeating the multiplication.
-function resaleTrips(tx: { tripCount?: number }): number {
-  return Math.max(1, tx.tripCount || 1);
-}
-
-function resaleTrueProfit(
-  tx: { tripCount?: number; truckCost: number; driverCost: number; explicitProfit: number; clientSellingPrice: number },
-  sourcingCost: number
-): number {
-  const trips = resaleTrips(tx);
-  const visibleTransportFee = trips * (tx.truckCost + tx.driverCost + tx.explicitProfit);
-  const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
-  return trips * tx.explicitProfit + hiddenMargin;
-}
 
 // Colored paid/remaining badge used in the trips and resales tables
 function PaymentBadge({ paid, total }: { paid: number; total: number }) {
@@ -194,6 +178,7 @@ export default function App() {
     materialType: "",
     originFactory: "",
     factoryPurchasePrice: 1500,
+    productUnitPrice: 4500,
     totalTonnage: 40,
     quantityUnit: T.common.defaultUnit,
     clientSellingPrice: 150000,
@@ -203,43 +188,6 @@ export default function App() {
     driverName: "",
     tripCount: 1,
   });
-
-  // Selling price per unit for the resale form. Form-only helper: the record
-  // stores the TOTAL (clientSellingPrice), but the operator normally thinks in
-  // price-per-unit, and the total must follow when the quantity changes.
-  const [resaleUnitPrice, setResaleUnitPrice] = useState<number>(0);
-
-  // Keep the two in sync from either direction.
-  //
-  // These totals are money, so they are never rounded: a price per unit times
-  // a fractional quantity keeps its exact value all the way to the invoice.
-  const setResaleSellingByUnit = (unitPrice: number) => {
-    setResaleUnitPrice(unitPrice);
-    setResaleForm(p => ({
-      ...p,
-      clientSellingPrice: unitPrice * (Number(p.totalTonnage) || 0),
-    }));
-  };
-
-  const setResaleQuantity = (qty: number) => {
-    setResaleForm(p => ({
-      ...p,
-      totalTonnage: qty,
-      // Only re-derive the total when a unit price is actually in play,
-      // so a manually typed total is never silently overwritten.
-      clientSellingPrice: resaleUnitPrice > 0
-        ? resaleUnitPrice * qty
-        : p.clientSellingPrice,
-    }));
-  };
-
-  const setResaleSellingTotal = (total: number) => {
-    setResaleForm(p => {
-      const qty = Number(p.totalTonnage) || 0;
-      setResaleUnitPrice(qty > 0 ? total / qty : 0);
-      return { ...p, clientSellingPrice: total };
-    });
-  };
 
   // State for Expense (Tab 3 Form)
   const [expenseForm, setExpenseForm] = useState<Partial<OtherExpense>>({
@@ -254,23 +202,19 @@ export default function App() {
   // Automatically compute Total Fee suggestion for Tab 1 as feedback in form
   const computedFormTotalTransportFee = (Number(tripForm.truckCost) || 0) + (Number(tripForm.driverCut) || 0) + (Number(tripForm.companyProfit) || 0);
 
-  // Automatically compute True Profit feedback in Tab 2 Form.
-  // The truck / driver / profit figures describe ONE trip, so the number of
-  // trips multiplies all three.
-  const tempSourcingCost = (Number(resaleForm.factoryPurchasePrice) || 0) * (Number(resaleForm.totalTonnage) || 0);
-  const resaleTripCount = Math.max(1, Number(resaleForm.tripCount) || 1);
-  const resalePerTripCost = (Number(resaleForm.truckCost) || 0) + (Number(resaleForm.driverCost) || 0) + (Number(resaleForm.explicitProfit) || 0);
-  const resaleTransportTotal = resaleTripCount * resalePerTripCost;
-  const tempHiddenMargin = (Number(resaleForm.clientSellingPrice) || 0) - (tempSourcingCost + resaleTransportTotal);
-  const computedFormTotalTrueProfit = resaleTripCount * (Number(resaleForm.explicitProfit) || 0) + tempHiddenMargin;
-
-  // The per-trip price the CLIENT sees on the invoice: the transport share of
-  // the selling price divided by the trips. Money is never rounded, so when
-  // this does not come out in whole dinars there is no figure to show here or
-  // to print — the operator is told instead, and can adjust the selling price.
-  const resaleClientTransport = (Number(resaleForm.clientSellingPrice) || 0) - tempSourcingCost;
-  const resaleClientPerTripExact = resaleTripCount > 0 && resaleClientTransport % resaleTripCount === 0;
-  const resaleClientPerTrip = resaleClientTransport / resaleTripCount;
+  // Live figures for the resale modal. Every number the form shows comes from
+  // this one call, so the goods section, the transport section and the profit
+  // summary cannot disagree — and a transport label can no longer end up
+  // displaying a product-margin value.
+  const resaleCalc = calcResale({
+    factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
+    productUnitPrice: Number(resaleForm.productUnitPrice) || 0,
+    totalTonnage: Number(resaleForm.totalTonnage) || 0,
+    truckCost: Number(resaleForm.truckCost) || 0,
+    driverCost: Number(resaleForm.driverCost) || 0,
+    explicitProfit: Number(resaleForm.explicitProfit) || 0,
+    tripCount: Number(resaleForm.tripCount) || 1,
+  });
 
   // --- Financial Calculations (Global Dashboard Cards) ---
   // Filtered Client Transport records
@@ -362,18 +306,12 @@ export default function App() {
     let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
 
     filteredResaleTxs.forEach(tx => {
-      const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
-      // Costs are per trip, so a delivery split over several trips incurs
-      // each of them that many times — including the driver's wage.
-      const trips = Math.max(1, tx.tripCount || 1);
-      const visibleTransportFee = trips * (tx.truckCost + tx.driverCost + tx.explicitProfit);
-      const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
-      const trueProfit = trips * tx.explicitProfit + hiddenMargin;
-      const driverWage = trips * tx.driverCost;
+      const m = calcResale(tx);
+      const driverWage = m.trips * tx.driverCost;
 
-      tradingTurnover += tx.clientSellingPrice;
-      capitalOutlay += sourcingCost;
-      totalTrueProfit += trueProfit;
+      tradingTurnover += m.invoiceTotal;
+      capitalOutlay += m.totalBuyCost;
+      totalTrueProfit += m.netRealProfit;
       totalTons += tx.totalTonnage;
       clientOutstanding += Math.max(0, tx.clientSellingPrice - (tx.clientPaid || 0));
       driverOutstanding += Math.max(0, driverWage - (tx.driverPaid || 0));
@@ -471,6 +409,7 @@ export default function App() {
         materialType: "",
         originFactory: "",
         factoryPurchasePrice: 1500,
+        productUnitPrice: 4500,
         totalTonnage: 40,
         quantityUnit: T.common.defaultUnit,
         clientSellingPrice: 180000,
@@ -480,7 +419,6 @@ export default function App() {
         driverName: "",
         tripCount: 1,
       });
-      setResaleUnitPrice(180000 / 40);
     } else {
       const id = await fetchNextExpenseId().catch(() => localNextId("EXP-", expenses.map(e => e.id)));
       setExpenseForm({
@@ -505,8 +443,6 @@ export default function App() {
       setTripForm({ ...record });
     } else if (targetType === "resale") {
       setResaleForm({ ...record });
-      const qty = Number(record.totalTonnage) || 0;
-      setResaleUnitPrice(qty > 0 ? (Number(record.clientSellingPrice) || 0) / qty : 0);
     } else {
       setExpenseForm({ ...record });
     }
@@ -563,9 +499,9 @@ export default function App() {
           materialType: resaleForm.materialType || "",
           originFactory: resaleForm.originFactory || "",
           factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
+          productUnitPrice: Number(resaleForm.productUnitPrice) || 0,
           totalTonnage: Number(resaleForm.totalTonnage) || 0,
           quantityUnit: resaleForm.quantityUnit || T.common.defaultUnit,
-          clientSellingPrice: Number(resaleForm.clientSellingPrice) || 0,
           truckCost: Number(resaleForm.truckCost) || 0,
           driverCost: Number(resaleForm.driverCost) || 0,
           explicitProfit: Number(resaleForm.explicitProfit) || 0,
@@ -686,12 +622,12 @@ export default function App() {
   // Chart data for Tab 2 sourcing vs resale combo comparison
   const tab2ChartData = useMemo(() => {
     return filteredResaleTxs.slice(0, 10).map(tx => {
-      const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
+      const m = calcResale(tx);
       return {
         name: tx.id,
-        [T.charts.materialPurchaseCost]: sourcingCost,
+        [T.charts.materialPurchaseCost]: m.totalBuyCost,
         [T.charts.finalSellingPrice]: tx.clientSellingPrice,
-        [T.charts.actualTotalProfit]: resaleTrueProfit(tx, sourcingCost)
+        [T.charts.actualTotalProfit]: m.netRealProfit
       };
     }).reverse();
   }, [filteredResaleTxs]);
@@ -844,39 +780,38 @@ export default function App() {
               const factureRemaining = factureTotal - facturePaid;
 
               if (selectedReceipt.type === "resale") {
-                const unitPrice = selectedReceipt.data.factoryPurchasePrice || 0;
+                // Two priced lines, each stated as quantity × unit price and
+                // each multiplying out exactly to its own total, because the
+                // invoice total is built FROM these lines rather than being
+                // typed independently and split afterwards.
+                const m = calcResale(selectedReceipt.data);
                 const qty = selectedReceipt.data.totalTonnage || 0;
                 const unit = selectedReceipt.data.quantityUnit || T.common.defaultUnit;
-                const productSubtotal = unitPrice * qty;
-                const transportPrice = factureTotal - productSubtotal;
-                // What the client pays per trip: this line's own total split
-                // across the trips, NOT the company's cost, so the margin
-                // stays private.
-                //
-                // Money is never rounded on an invoice. If the total does not
-                // divide into whole dinars there is no exact per-trip price to
-                // print, so none is printed — the line simply shows its total.
-                // The form flags this while the selling price is being entered,
-                // so the operator can make it divide and get the breakdown.
-                const factureTrips = Math.max(1, selectedReceipt.data.tripCount || 1);
-                const perTripExact = transportPrice % factureTrips === 0;
-                const perTripPrice = (transportPrice / factureTrips).toLocaleString();
+                const productUnitPrice = selectedReceipt.data.productUnitPrice || 0;
                 return (
                   <div className="bg-slate-100 border-2 border-slate-800 rounded-lg p-6 space-y-3">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-slate-700">{T.facture.goodsPriceLabel(qty, unit, unitPrice.toLocaleString())}</span>
-                      <span className="font-mono font-bold text-slate-900">{productSubtotal.toLocaleString()} {T.common.currency}</span>
+                    {/* Line 1 — the goods */}
+                    <div className="flex justify-between items-start text-sm">
+                      <div className="text-slate-700">
+                        <div className="font-bold">{selectedReceipt.data.materialType || T.facture.goodsLineFallback}</div>
+                        <div className="text-xs text-slate-500 font-mono">
+                          {qty.toLocaleString()} {unit} × {productUnitPrice.toLocaleString()} {T.common.currency}
+                        </div>
+                      </div>
+                      <span className="font-mono font-bold text-slate-900">{m.totalSellRevenue.toLocaleString()} {T.common.currency}</span>
                     </div>
-                    <div className="flex justify-between items-center text-sm border-t border-slate-300 pt-2">
-                      <span className="text-slate-700">
-                        {factureTrips > 1 && perTripExact
-                          ? T.facture.deliveryPriceMultiTrip(factureTrips, perTripPrice)
-                          : factureTrips > 1
-                            ? T.facture.deliveryPriceTripsOnly(factureTrips)
-                            : T.facture.deliveryPriceLabel}
-                      </span>
-                      <span className="font-mono font-bold text-slate-900">{transportPrice.toLocaleString()} {T.common.currency}</span>
+
+                    {/* Line 2 — the delivery */}
+                    <div className="flex justify-between items-start text-sm border-t border-slate-300 pt-2">
+                      <div className="text-slate-700">
+                        <div className="font-bold">{T.facture.transportLineTitle}</div>
+                        <div className="text-xs text-slate-500 font-mono">
+                          {m.trips} {T.facture.tripsUnit} × {m.costPerTrip.toLocaleString()} {T.common.currency}
+                        </div>
+                      </div>
+                      <span className="font-mono font-bold text-slate-900">{m.transportTotal.toLocaleString()} {T.common.currency}</span>
                     </div>
+
                     <div className="flex justify-between items-center border-t-2 border-slate-800 pt-2">
                       <span className="text-base font-bold text-slate-900">{T.facture.grandTotalLabel}</span>
                       <span className="text-2xl font-mono font-bold text-slate-950">{factureTotal.toLocaleString()} {T.common.currency}</span>
@@ -1559,7 +1494,7 @@ export default function App() {
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
                     <span className="text-2xl font-black font-mono text-blue-400 block mt-1">
-                      {filteredResaleTxs.reduce((sum, tx) => sum + resaleTrips(tx) * (tx.truckCost + tx.driverCost + tx.explicitProfit), 0).toLocaleString()} {T.common.currency}
+                      {filteredResaleTxs.reduce((sum, tx) => sum + calcResale(tx).transportTotal, 0).toLocaleString()} {T.common.currency}
                     </span>
                     <span className="text-[10px] text-slate-500">{T.resale.kpiVisibleTransportHint}</span>
                   </div>
@@ -1666,10 +1601,10 @@ export default function App() {
                               </tr>
                             ) : (
                               filteredResaleTxs.map(tx => {
-                                const sourcingCost = tx.factoryPurchasePrice * tx.totalTonnage;
-                                const visibleTransportFee = resaleTrips(tx) * (tx.truckCost + tx.driverCost + tx.explicitProfit);
-                                const hiddenMargin = tx.clientSellingPrice - (sourcingCost + visibleTransportFee);
-                                const totalTrueProfit = tx.explicitProfit + hiddenMargin;
+                                const m = calcResale(tx);
+                                const sourcingCost = m.totalBuyCost;
+                                const hiddenMargin = m.hiddenProfit;
+                                const totalTrueProfit = m.netRealProfit;
 
                                 return (
                                   <tr key={tx.id} className="hover:bg-slate-800/40 transition">
@@ -2269,7 +2204,7 @@ export default function App() {
                             type="number"
                             required
                             value={resaleForm.totalTonnage}
-                            onChange={e => setResaleQuantity(parseFloat(e.target.value) || 0)}
+                            onChange={e => setResaleForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
                             className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
                           />
                           <input
@@ -2285,39 +2220,49 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="text-[10px] text-slate-400 -mt-1 flex justify-between bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
-                      <span>{T.form.sourcingCostLabel}</span>
-                      <strong className="text-rose-300 font-mono">{tempSourcingCost.toLocaleString()} {T.common.currency}</strong>
+                    {/* ── GOODS ─────────────────────────────────────────────
+                        Buy cost, sell revenue and the profit the goods alone
+                        make. Kept strictly separate from transport below: this
+                        section's margin used to be rendered inside the
+                        logistics box, which made a transport label show a
+                        product figure. */}
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                      <span className="text-[10px] text-amber-400 font-bold block">{T.form.goodsSectionTitle}</span>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-slate-500 mb-1">{T.form.unitSellingPrice}</label>
+                          <input
+                            type="number"
+                            required
+                            value={resaleForm.productUnitPrice ?? ""}
+                            placeholder={T.form.unitSellingPricePlaceholder}
+                            onChange={e => setResaleForm(p => ({ ...p, productUnitPrice: parseFloat(e.target.value) || 0 }))}
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                          />
+                        </div>
+                        <div className="flex flex-col justify-end">
+                          <div className="flex justify-between text-[10px] text-slate-400 pb-1">
+                            <span>{T.form.totalBuyCostLabel}</span>
+                            <strong className="text-rose-300 font-mono">{resaleCalc.totalBuyCost.toLocaleString()} {T.common.currency}</strong>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                            <span>{T.form.totalSellRevenueLabel}</span>
+                            <strong className="text-cyan-300 font-mono">{resaleCalc.totalSellRevenue.toLocaleString()} {T.common.currency}</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
+                        <span>{T.form.grossProductProfitLabel}</span>
+                        <strong className="text-amber-400 font-mono">{resaleCalc.grossProductProfit.toLocaleString()} {T.common.currency}</strong>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.unitSellingPrice}</label>
-                        {/* Never rounded: when the total does not divide evenly
-                            by the quantity, the operator must see the real
-                            price per unit, not a tidied-up one. */}
-                        <input
-                          type="number"
-                          value={resaleUnitPrice || ""}
-                          placeholder={T.form.unitSellingPricePlaceholder}
-                          onChange={e => setResaleSellingByUnit(parseFloat(e.target.value) || 0)}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.totalSellingPrice}</label>
-                        <input
-                          type="number"
-                          required
-                          placeholder={T.form.totalSellingPricePlaceholder}
-                          value={resaleForm.clientSellingPrice}
-                          onChange={e => setResaleSellingTotal(parseInt(e.target.value) || 0)}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-mono font-bold"
-                        />
-                      </div>
-                    </div>
-
-                    {/* TRUCK DRIVER EXPLICIT STRUCTURE */}
+                    {/* ── TRANSPORT ─────────────────────────────────────────
+                        Truck, driver and visible margin are all PER TRIP, so
+                        the trip count multiplies them. Nothing from the goods
+                        section appears here. */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
                       <span className="text-[10px] text-cyan-400 font-bold block">{T.form.logisticsTitle}</span>
                       <div className="grid grid-cols-3 gap-2">
@@ -2352,19 +2297,8 @@ export default function App() {
                           />
                         </div>
                       </div>
-                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                        <span>{T.form.hiddenMarginLabel} <strong className="text-amber-400">{tempHiddenMargin.toLocaleString()} {T.common.currency}</strong></span>
-                        <span>{T.form.trueProfitLabel} <strong className="text-emerald-400">{computedFormTotalTrueProfit.toLocaleString()} {T.common.currency}</strong></span>
-                      </div>
-                    </div>
 
-                    {/* Trips. The per-trip price is not typed in: it is the
-                        logistics box above (truck + driver + profit), which
-                        describes one trip. Entering it by hand used to let the
-                        two disagree. */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-violet-400 font-bold block">{T.form.multiTripTitle}</span>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-2 items-end">
                         <div>
                           <label className="block text-slate-500 mb-1">{T.form.tripCount}</label>
                           <input
@@ -2377,33 +2311,41 @@ export default function App() {
                             className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
                           />
                         </div>
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.tripUnitCost}</label>
-                          <div className="w-full bg-slate-900/60 border border-slate-800 p-1 rounded text-violet-300 font-mono">
-                            {resalePerTripCost.toLocaleString()} {T.common.currency}
-                          </div>
+                        <div className="flex justify-between text-[10px] text-slate-400 pb-1">
+                          <span>{T.form.tripUnitCost}</span>
+                          <strong className="text-violet-300 font-mono">{resaleCalc.costPerTrip.toLocaleString()} {T.common.currency}</strong>
                         </div>
                       </div>
+
                       <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
                         <span>{T.form.multiTripTotal}</span>
                         <strong className="text-violet-400 font-mono">
-                          {resaleTripCount} × {resalePerTripCost.toLocaleString()} = {resaleTransportTotal.toLocaleString()} {T.common.currency}
+                          {resaleCalc.trips} × {resaleCalc.costPerTrip.toLocaleString()} = {resaleCalc.transportTotal.toLocaleString()} {T.common.currency}
                         </strong>
                       </div>
+                    </div>
 
-                      {/* Preview of the figure the CLIENT will see on the
-                          invoice, which is the transport portion of the selling
-                          price split across the trips — not the cost above.
-                          Shown here so an uneven split can be spotted and the
-                          selling price nudged before anything is printed. */}
-                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                        <span>{T.form.clientPerTripLabel}</span>
-                        <strong className={resaleClientPerTripExact ? "text-cyan-300 font-mono" : "text-amber-400"}>
-                          {resaleClientPerTripExact
-                            ? `${resaleClientPerTrip.toLocaleString()} ${T.common.currency}`
-                            : T.form.perTripNotExact}
-                        </strong>
+                    {/* ── PROFIT SUMMARY ────────────────────────────────────
+                        Its own section, so neither figure can be mistaken for
+                        a goods or a transport number. */}
+                    <div className="p-3 bg-slate-950 rounded-xl border border-emerald-900/60 space-y-2">
+                      <span className="text-[10px] text-emerald-400 font-bold block">{T.form.profitSummaryTitle}</span>
+                      <div className="flex justify-between text-[10px] text-slate-400">
+                        <span>{T.form.hiddenMarginLabel}</span>
+                        <strong className="text-amber-400 font-mono">{resaleCalc.hiddenProfit.toLocaleString()} {T.common.currency}</strong>
                       </div>
+                      <div className="pt-2 text-[11px] border-t border-slate-800 flex justify-between text-slate-300">
+                        <span className="font-bold">{T.form.trueProfitLabel}</span>
+                        <strong className="text-emerald-400 font-mono text-sm">{resaleCalc.netRealProfit.toLocaleString()} {T.common.currency}</strong>
+                      </div>
+                    </div>
+
+                    {/* ── WHAT THE CLIENT IS BILLED ─────────────────────────
+                        Derived, never typed, so the two invoice lines always
+                        add up to the amount the payment ledgers settle. */}
+                    <div className="p-3 bg-slate-900 rounded-xl border border-blue-900/60 flex justify-between items-center">
+                      <span className="text-[11px] text-blue-300 font-bold">{T.form.invoiceTotalLabel}</span>
+                      <strong className="text-blue-300 font-mono text-base">{resaleCalc.invoiceTotal.toLocaleString()} {T.common.currency}</strong>
                     </div>
 
                     {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
