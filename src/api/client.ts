@@ -404,6 +404,27 @@ export async function deleteSupplierPayment(id: string): Promise<void> {
   return request(`/supplier-payments/${id}`, { method: 'DELETE' });
 }
 
+/** Advance still on account with a supplier (paid, not yet deducted). */
+export async function fetchSupplierAvailableAdvance(supplierName: string): Promise<number> {
+  const data = await request<{ available: number }>(
+    `/supplier-payments/available/${encodeURIComponent(supplierName)}`
+  );
+  return data.available;
+}
+
+/** Draw an amount off a supplier's advance against one shipment or invoice. */
+export async function deductFromSupplierAdvance(payload: {
+  supplierName: string;
+  targetType: 'resale' | 'invoice';
+  targetId: string;
+  amount: number;
+}): Promise<{ deducted: number; remainingAdvance: number; targetRemaining: number }> {
+  return request('/supplier-payments/deduct', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchSupplierInvoices(params?: {
   supplierName?: string;
   dateStart?: string;
