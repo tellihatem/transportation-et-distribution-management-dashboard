@@ -11,7 +11,8 @@ import {
   createSupplierPayment,
   deleteSupplierPayment,
   createSupplierInvoice,
-  deleteSupplierInvoice
+  deleteSupplierInvoice,
+  deductFromSupplierAdvance
 } from '../api/client';
 
 export function useSupplierPayments(filters?: TabFilters) {
@@ -80,6 +81,18 @@ export function useSupplierPayments(filters?: TabFilters) {
     await load();
   }, [load]);
 
+  /** Manual drawdown: deduct part of the advance against one delivery. */
+  const deductAdvance = useCallback(async (payload: {
+    supplierName: string;
+    targetType: 'resale' | 'invoice';
+    targetId: string;
+    amount: number;
+  }) => {
+    const result = await deductFromSupplierAdvance(payload);
+    await load();
+    return result;
+  }, [load]);
+
   return {
     payments,
     summaries,
@@ -89,6 +102,7 @@ export function useSupplierPayments(filters?: TabFilters) {
     recordPayment,
     removePayment,
     addInvoice,
-    removeInvoice
+    removeInvoice,
+    deductAdvance
   };
 }

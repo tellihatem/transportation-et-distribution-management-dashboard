@@ -128,7 +128,7 @@ export default function App() {
   const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
   const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, reload: reloadClientPayments } = useClientPayments(filters);
   const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, reload: reloadDriverPayments } = useDriverPayments(filters);
-  const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, addInvoice: addSupplierInvoice, reload: reloadSupplierPayments } = useSupplierPayments(filters);
+  const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, addInvoice: addSupplierInvoice, deductAdvance: deductSupplierAdvance, reload: reloadSupplierPayments } = useSupplierPayments(filters);
 
   // Which build is running and which database file it opened — shown in the
   // header badge and in the reset dialog.
@@ -1274,6 +1274,7 @@ export default function App() {
                   filters={filters}
                   onRecordPayment={recordSupplierPayment}
                   onRecordInvoice={addSupplierInvoice}
+                  onDeductAdvance={deductSupplierAdvance}
                   onRefresh={refreshAllData}
                 />
               </motion.div>

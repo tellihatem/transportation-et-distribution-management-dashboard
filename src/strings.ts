@@ -413,7 +413,26 @@ export const T = {
     shipmentsCell: (unpaid: number) => `شحنة/فاتورة (${unpaid} غير مسددة)`,
     /** Row buttons. */
     payAction: "دفع / تسديد",
+    deductAction: "خصم من الرصيد",
     statementAction: "كشف حساب",
+
+    /* --- "Deduct from the advance" box ---
+     *  Where the owner draws money off a supplier's advance for a specific
+     *  delivery, one shipment at a time. */
+    deductModalTitle: "خصم من الرصيد المسبق لدى المورد",
+    deductAvailableLabel: "الرصيد المسبق المتاح لدى المورد:",
+    deductHint: "اختر الشحنة أو الفاتورة واخصم قيمتها من الرصيد المسبق. يُخصم المبلغ من أقدم دفعة مسبقة أولاً.",
+    deductNoAdvance: "لا يوجد رصيد مسبق لدى هذا المورد. سجّل دفعة مسبقة أولاً.",
+    deductNoItems: "لا توجد شحنات أو فواتير غير مخصومة لهذا المورد.",
+    deductColRemaining: "المتبقي عليها",
+    deductColAmount: "المبلغ المراد خصمه",
+    deductColAction: "تنفيذ",
+    deductButton: "خصم",
+    deducting: "جاري الخصم...",
+    deductDone: (amount: string, remaining: string) =>
+      `تم خصم ${amount} دج. الرصيد المسبق المتبقي: ${remaining} دج.`,
+    deductError: (message: string) => `تعذر الخصم من الرصيد: ${message}`,
+    deductClose: "إغلاق",
 
     /* --- "Pay a supplier" dialog --- */
     paymentModalTitle: "تسجيل دفعة لمورد",

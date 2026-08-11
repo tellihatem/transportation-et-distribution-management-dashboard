@@ -68,6 +68,50 @@ function syncTargetPaid(targetType: 'resale' | 'invoice', targetId: string) {
   }
 }
 
+/**
+ * Advance still sitting with a supplier: everything paid, minus everything
+ * already deducted against shipments and invoices.
+ */
+function availableAdvance(supplierName: string): number {
+  const row = db.prepare(`
+    SELECT
+      COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_name = ?), 0)
+      -
+      COALESCE((
+        SELECT SUM(a.amount)
+        FROM supplier_payment_allocations a
+        JOIN supplier_payments p ON p.id = a.payment_id
+        WHERE p.supplier_name = ?
+      ), 0) AS available
+  `).get(supplierName, supplierName) as { available: number };
+  return Math.max(0, row.available);
+}
+
+/**
+ * What a shipment or invoice still owes, or null when it does not exist or
+ * belongs to a different supplier (guards against deducting one supplier's
+ * credit against another's delivery).
+ */
+function targetRemaining(
+  targetType: 'resale' | 'invoice',
+  targetId: string,
+  supplierName: string
+): number | null {
+  if (targetType === 'resale') {
+    const r = db.prepare(
+      'SELECT * FROM material_resales WHERE id = ? AND origin_factory = ?'
+    ).get(targetId, supplierName) as any;
+    if (!r) return null;
+    return resaleSupplierCost(r) - (r.supplier_paid ?? 0);
+  }
+
+  const i = db.prepare(
+    'SELECT * FROM supplier_invoices WHERE id = ? AND supplier_name = ?'
+  ).get(targetId, supplierName) as any;
+  if (!i) return null;
+  return i.amount - (i.paid ?? 0);
+}
+
 function nextPaymentId(): string {
   const rows = db.prepare('SELECT id FROM supplier_payments').all() as { id: string }[];
   const max = rows.reduce((m, r) => {
@@ -197,11 +241,14 @@ supplierPaymentsRouter.get('/summary', asyncHandler(async (_req: Request, res: R
     const totalOwed = resaleOwed + invoiceOwed;
     const totalAllocatedPaid = resalePaid + invoicePaid;
 
-    // NET semantics (operator's choice): a prepayment offsets the balance as
-    // a whole. Money paid beyond what is owed is prepaid credit; goods
-    // received beyond what was paid is outstanding debt. Never both.
-    const outstandingDebt = Math.max(0, totalOwed - totalPaymentsGiven);
-    const prepaidBalance = Math.max(0, totalPaymentsGiven - totalOwed);
+    // DRAWDOWN semantics: an advance is money sitting with the supplier until
+    // the owner deducts it against a specific shipment. So the credit only
+    // falls when he actually makes that deduction, and a shipment counts as
+    // debt until it has been deducted for. A supplier can therefore show both
+    // at once — credit still on account, and goods received but not yet drawn
+    // down — which is the true position, not a contradiction.
+    const outstandingDebt = Math.max(0, totalOwed - totalAllocatedPaid);
+    const prepaidBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
 
     const shipmentsCount = resales.length + invoices.length;
     const unpaidCount =
@@ -266,8 +313,9 @@ supplierPaymentsRouter.get('/statement/:supplierName', asyncHandler(async (req: 
   const totalOwed = itemized.reduce((sum, item) => sum + item.owed, 0);
   const totalAllocatedPaid = itemized.reduce((sum, item) => sum + item.paid, 0);
   const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
-  const outstandingDebt = Math.max(0, totalOwed - totalPaymentsGiven);
-  const prepaidBalance = Math.max(0, totalPaymentsGiven - totalOwed);
+  // Drawdown semantics — see the summary endpoint.
+  const outstandingDebt = Math.max(0, totalOwed - totalAllocatedPaid);
+  const prepaidBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
 
   res.json({
     success: true,
@@ -355,6 +403,98 @@ supplierPaymentsRouter.post('/', asyncHandler(async (req: Request, res: Response
 
   const created = db.prepare('SELECT * FROM supplier_payments WHERE id = ?').get(id);
   res.status(201).json({ success: true, data: created });
+}));
+
+/**
+ * GET /api/supplier-payments/available/:supplierName — Advance still on
+ * account: money paid to this supplier that has not been deducted yet.
+ */
+supplierPaymentsRouter.get('/available/:supplierName', asyncHandler(async (req: Request, res: Response) => {
+  res.json({ success: true, data: { available: availableAdvance(req.params.supplierName) } });
+}));
+
+/**
+ * POST /api/supplier-payments/deduct — Draw an amount off a supplier's
+ * advance against ONE shipment or invoice.
+ *
+ * This is the manual drawdown: the operator decides which delivery the money
+ * is being used for and how much. The amount is taken from the supplier's
+ * oldest payments that still have room, so the receipt history stays in
+ * order, and it is refused outright if it exceeds either the advance on
+ * account or what that shipment still owes — money can never be deducted
+ * twice or deducted from credit that does not exist.
+ */
+supplierPaymentsRouter.post('/deduct', asyncHandler(async (req: Request, res: Response) => {
+  const { supplierName, targetType, targetId, amount } = req.body;
+
+  if (!supplierName || !targetType || !targetId || !amount || amount <= 0) {
+    throw createApiError('Missing required fields: supplierName, targetType, targetId, amount', 400, 'VALIDATION_ERROR');
+  }
+  if (targetType !== 'resale' && targetType !== 'invoice') {
+    throw createApiError("targetType must be 'resale' or 'invoice'", 400, 'VALIDATION_ERROR');
+  }
+
+  const available = availableAdvance(supplierName);
+  if (amount > available) {
+    throw createApiError(
+      `Deduction exceeds the advance on account (available: ${available})`,
+      400,
+      'INSUFFICIENT_ADVANCE'
+    );
+  }
+
+  const remaining = targetRemaining(targetType, targetId, supplierName);
+  if (remaining === null) {
+    throw createApiError('Shipment or invoice not found for this supplier', 404, 'NOT_FOUND');
+  }
+  if (amount > remaining) {
+    throw createApiError(
+      `Deduction exceeds what this shipment still owes (remaining: ${remaining})`,
+      400,
+      'EXCEEDS_REMAINING'
+    );
+  }
+
+  const deductTx = db.transaction(() => {
+    // Draw from the oldest payments that still have unallocated room.
+    const payments = db.prepare(`
+      SELECT p.id, p.amount,
+             COALESCE((SELECT SUM(a.amount) FROM supplier_payment_allocations a WHERE a.payment_id = p.id), 0) AS allocated
+      FROM supplier_payments p
+      WHERE p.supplier_name = ?
+      ORDER BY p.date ASC, p.id ASC
+    `).all(supplierName) as any[];
+
+    let left = amount;
+    for (const p of payments) {
+      if (left <= 0) break;
+      const room = p.amount - p.allocated;
+      if (room <= 0) continue;
+
+      const take = Math.min(room, left);
+      db.prepare(`
+        INSERT INTO supplier_payment_allocations (payment_id, target_type, target_id, amount)
+        VALUES (?, ?, ?, ?)
+      `).run(p.id, targetType, targetId, take);
+      left -= take;
+    }
+
+    syncTargetPaid(targetType, targetId);
+  });
+
+  deductTx();
+
+  res.json({
+    success: true,
+    data: {
+      supplierName,
+      targetType,
+      targetId,
+      deducted: amount,
+      remainingAdvance: availableAdvance(supplierName),
+      targetRemaining: targetRemaining(targetType, targetId, supplierName)
+    }
+  });
 }));
 
 /**

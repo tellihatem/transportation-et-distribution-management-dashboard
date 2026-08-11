@@ -23,7 +23,12 @@ import {
   ReceiptText
 } from 'lucide-react';
 import type { SupplierSummary, SupplierStatement, TabFilters } from '../types';
-import { fetchSupplierStatement, fetchNextSupplierPaymentId, fetchNextSupplierInvoiceId } from '../api/client';
+import {
+  fetchSupplierStatement,
+  fetchNextSupplierPaymentId,
+  fetchNextSupplierInvoiceId,
+  fetchSupplierAvailableAdvance
+} from '../api/client';
 import { T } from '../strings';
 
 interface SupplierAccountsTabProps {
@@ -32,6 +37,12 @@ interface SupplierAccountsTabProps {
   filters: TabFilters;
   onRecordPayment: (payload: any) => Promise<any>;
   onRecordInvoice: (payload: any) => Promise<any>;
+  onDeductAdvance: (payload: {
+    supplierName: string;
+    targetType: 'resale' | 'invoice';
+    targetId: string;
+    amount: number;
+  }) => Promise<{ deducted: number; remainingAdvance: number; targetRemaining: number }>;
   onRefresh: () => void;
 }
 
@@ -41,6 +52,7 @@ export function SupplierAccountsTab({
   filters,
   onRecordPayment,
   onRecordInvoice,
+  onDeductAdvance,
   onRefresh
 }: SupplierAccountsTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,6 +62,15 @@ export function SupplierAccountsTab({
   const [statementData, setStatementData] = useState<SupplierStatement | null>(null);
   const [loadingStatement, setLoadingStatement] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Drawdown box state
+  const [isDeductModalOpen, setIsDeductModalOpen] = useState(false);
+  const [deductSupplier, setDeductSupplier] = useState('');
+  const [availableAdvance, setAvailableAdvance] = useState(0);
+  const [deductItems, setDeductItems] = useState<SupplierStatement['itemized']>([]);
+  const [deductAmounts, setDeductAmounts] = useState<Record<string, number>>({});
+  const [loadingDeduct, setLoadingDeduct] = useState(false);
+  const [deductingId, setDeductingId] = useState<string | null>(null);
 
   const [paymentForm, setPaymentForm] = useState({
     id: '',
@@ -100,6 +121,57 @@ export function SupplierAccountsTab({
       setIsInvoiceModalOpen(true);
     } catch (e) {
       console.error('Failed to get next supplier invoice ID:', e);
+    }
+  };
+
+  /**
+   * The drawdown box: the supplier's remaining advance plus every shipment
+   * and invoice still owing, so the owner can deduct one at a time.
+   */
+  const openDeductForSupplier = async (supplierName: string) => {
+    setDeductSupplier(supplierName);
+    setIsDeductModalOpen(true);
+    setLoadingDeduct(true);
+    try {
+      const [advance, statement] = await Promise.all([
+        fetchSupplierAvailableAdvance(supplierName),
+        fetchSupplierStatement(supplierName)
+      ]);
+      setAvailableAdvance(advance);
+      const unsettled = statement.itemized.filter(i => i.remaining > 0);
+      setDeductItems(unsettled);
+      // Prefill each row with whatever can actually be deducted right now.
+      const amounts: Record<string, number> = {};
+      for (const i of unsettled) amounts[i.id] = Math.min(i.remaining, advance);
+      setDeductAmounts(amounts);
+    } catch (e) {
+      console.error('Failed to load deduction data:', e);
+    } finally {
+      setLoadingDeduct(false);
+    }
+  };
+
+  const handleDeduct = async (item: SupplierStatement['itemized'][number]) => {
+    const amount = Number(deductAmounts[item.id]) || 0;
+    if (amount <= 0) return;
+    setDeductingId(item.id);
+    try {
+      const result = await onDeductAdvance({
+        supplierName: deductSupplier,
+        targetType: item.type,
+        targetId: item.id,
+        amount,
+      });
+      alert(T.supplierAccounts.deductDone(
+        result.deducted.toLocaleString(),
+        result.remainingAdvance.toLocaleString()
+      ));
+      await openDeductForSupplier(deductSupplier); // refresh the box in place
+      onRefresh();
+    } catch (err: any) {
+      alert(T.supplierAccounts.deductError(err.message));
+    } finally {
+      setDeductingId(null);
     }
   };
 
@@ -332,6 +404,14 @@ export function SupplierAccountsTab({
                         >
                           <CreditCard className="w-3.5 h-3.5" />
                           {T.supplierAccounts.payAction}
+                        </button>
+                        <button
+                          onClick={() => openDeductForSupplier(s.supplierName)}
+                          disabled={s.prepaidBalance <= 0}
+                          className="px-3 py-1.5 bg-blue-900/60 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed text-blue-200 border border-blue-700/60 rounded text-xs font-medium transition-colors flex items-center gap-1"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          {T.supplierAccounts.deductAction}
                         </button>
                         <button
                           onClick={() => openStatementForSupplier(s.supplierName)}
@@ -598,6 +678,114 @@ export function SupplierAccountsTab({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* DEDUCT-FROM-ADVANCE BOX
+          The manual drawdown: pick a delivery, take its cost off the advance
+          the supplier is holding. */}
+      {isDeductModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-blue-900/70 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl dir-rtl">
+            <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
+              <div className="flex items-center gap-2 text-blue-300 font-bold text-lg">
+                <ShieldCheck className="w-5 h-5" />
+                {T.supplierAccounts.deductModalTitle}
+              </div>
+              <button
+                onClick={() => setIsDeductModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-700/50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="flex items-center justify-between bg-blue-950/30 border border-blue-900/60 rounded-xl px-4 py-3">
+                <div>
+                  <div className="text-xs text-blue-300/80">{T.supplierAccounts.deductAvailableLabel}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{deductSupplier}</div>
+                </div>
+                <div className="text-2xl font-bold text-blue-300 font-mono">
+                  {availableAdvance.toLocaleString()} <span className="text-sm font-normal text-blue-500">{T.common.currency}</span>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-400">{T.supplierAccounts.deductHint}</p>
+
+              {loadingDeduct ? (
+                <div className="p-8 text-center text-slate-400 text-sm">{T.supplierAccounts.statementLoading}</div>
+              ) : availableAdvance <= 0 ? (
+                <div className="p-8 text-center text-amber-400 text-sm">{T.supplierAccounts.deductNoAdvance}</div>
+              ) : deductItems.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-sm">{T.supplierAccounts.deductNoItems}</div>
+              ) : (
+                <div className="border border-slate-700 rounded-lg overflow-hidden">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-900 text-slate-300 font-semibold border-b border-slate-700">
+                      <tr>
+                        <th className="p-2.5">{T.supplierAccounts.stmtColDate}</th>
+                        <th className="p-2.5">{T.supplierAccounts.stmtColType}</th>
+                        <th className="p-2.5">{T.supplierAccounts.stmtColId}</th>
+                        <th className="p-2.5">{T.supplierAccounts.deductColRemaining}</th>
+                        <th className="p-2.5">{T.supplierAccounts.deductColAmount}</th>
+                        <th className="p-2.5 text-center">{T.supplierAccounts.deductColAction}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {deductItems.map(item => (
+                        <tr key={item.id} className="hover:bg-slate-700/30">
+                          <td className="p-2.5 font-mono text-slate-400">{item.date}</td>
+                          <td className="p-2.5">
+                            {item.type === 'resale' ? (
+                              <span className="text-cyan-400 bg-cyan-950/40 px-1.5 py-0.5 rounded">{T.supplierAccounts.typeResale}</span>
+                            ) : (
+                              <span className="text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded">{T.supplierAccounts.typeInvoice}</span>
+                            )}
+                          </td>
+                          <td className="p-2.5 font-mono font-bold text-slate-200">{item.id}</td>
+                          <td className="p-2.5 font-mono text-amber-400">{item.remaining.toLocaleString()} {T.common.currency}</td>
+                          <td className="p-2.5">
+                            <input
+                              type="number"
+                              min={1}
+                              max={Math.min(item.remaining, availableAdvance)}
+                              value={deductAmounts[item.id] ?? 0}
+                              onChange={e => setDeductAmounts(prev => ({ ...prev, [item.id]: Number(e.target.value) }))}
+                              className="w-32 bg-slate-900 border border-blue-800/60 rounded px-2 py-1 text-blue-200 font-mono"
+                            />
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              onClick={() => handleDeduct(item)}
+                              disabled={
+                                deductingId !== null ||
+                                (deductAmounts[item.id] ?? 0) <= 0 ||
+                                (deductAmounts[item.id] ?? 0) > Math.min(item.remaining, availableAdvance)
+                              }
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-bold transition-colors"
+                            >
+                              {deductingId === item.id ? T.supplierAccounts.deducting : T.supplierAccounts.deductButton}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-700">
+              <button
+                type="button"
+                onClick={() => setIsDeductModalOpen(false)}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium"
+              >
+                {T.supplierAccounts.deductClose}
+              </button>
+            </div>
           </div>
         </div>
       )}
