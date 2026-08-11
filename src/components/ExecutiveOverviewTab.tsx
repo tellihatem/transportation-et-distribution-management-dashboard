@@ -18,7 +18,8 @@ import {
   ArrowUpRight,
   ShieldCheck,
   Percent,
-  Compass
+  Compass,
+  Factory
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -45,7 +46,7 @@ interface ExecutiveOverviewTabProps {
   expenses: OtherExpense[];
   clientSummaries: ClientSummary[];
   driverSummaries: DriverSummary[];
-  onNavigateTab: (tab: 'transport' | 'resale' | 'expenses' | 'clients' | 'drivers') => void;
+  onNavigateTab: (tab: 'transport' | 'resale' | 'expenses' | 'clients' | 'drivers' | 'suppliers') => void;
 }
 
 const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4'];
@@ -285,6 +286,17 @@ export function ExecutiveOverviewTab({
                   {T.overview.quickLinkDrivers}
                 </span>
                 <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition-colors" />
+              </button>
+
+              <button
+                onClick={() => onNavigateTab('suppliers')}
+                className="w-full flex items-center justify-between p-3 bg-slate-900/80 hover:bg-amber-950/40 border border-slate-700 hover:border-amber-700/60 rounded-xl text-xs font-semibold text-slate-200 hover:text-amber-300 transition-all group"
+              >
+                <span className="flex items-center gap-2">
+                  <Factory className="w-4 h-4 text-amber-400" />
+                  {T.overview.quickLinkSuppliers}
+                </span>
+                <ArrowUpRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors" />
               </button>
 
               <button

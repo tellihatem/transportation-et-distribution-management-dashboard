@@ -360,6 +360,82 @@ export async function deleteDriverPayment(id: string): Promise<void> {
 }
 
 // ──────────────────────────────────────────
+// Supplier/Factory Ledger
+// ──────────────────────────────────────────
+
+export async function fetchSupplierPayments(params?: {
+  supplierName?: string;
+  dateStart?: string;
+  dateEnd?: string;
+}): Promise<import('../types').SupplierPayment[]> {
+  const query = buildQueryString(params);
+  return request<import('../types').SupplierPayment[]>(`/supplier-payments${query}`);
+}
+
+export async function fetchSupplierSummaries(): Promise<import('../types').SupplierSummary[]> {
+  return request<import('../types').SupplierSummary[]>('/supplier-payments/summary');
+}
+
+export async function fetchSupplierStatement(supplierName: string): Promise<import('../types').SupplierStatement> {
+  return request<import('../types').SupplierStatement>(`/supplier-payments/statement/${encodeURIComponent(supplierName)}`);
+}
+
+export async function fetchNextSupplierPaymentId(): Promise<string> {
+  const data = await request<{ nextId: string }>('/supplier-payments/next-id');
+  return data.nextId;
+}
+
+export async function createSupplierPayment(payload: {
+  id?: string;
+  date: string;
+  supplierName: string;
+  amount: number;
+  paymentType?: string;
+  notes?: string;
+  allocationMode: 'auto' | 'none';
+}): Promise<import('../types').SupplierPayment> {
+  return request<import('../types').SupplierPayment>('/supplier-payments', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSupplierPayment(id: string): Promise<void> {
+  return request(`/supplier-payments/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchSupplierInvoices(params?: {
+  supplierName?: string;
+  dateStart?: string;
+  dateEnd?: string;
+}): Promise<import('../types').SupplierInvoice[]> {
+  const query = buildQueryString(params);
+  return request<import('../types').SupplierInvoice[]>(`/supplier-invoices${query}`);
+}
+
+export async function fetchNextSupplierInvoiceId(): Promise<string> {
+  const data = await request<{ nextId: string }>('/supplier-invoices/next-id');
+  return data.nextId;
+}
+
+export async function createSupplierInvoice(payload: {
+  id?: string;
+  date: string;
+  supplierName: string;
+  amount: number;
+  notes?: string;
+}): Promise<import('../types').SupplierInvoice> {
+  return request<import('../types').SupplierInvoice>('/supplier-invoices', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSupplierInvoice(id: string): Promise<void> {
+  return request(`/supplier-invoices/${id}`, { method: 'DELETE' });
+}
+
+// ──────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────
 

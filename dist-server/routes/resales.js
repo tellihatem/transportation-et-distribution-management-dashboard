@@ -148,10 +148,18 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * PUT /api/resales/:id — Update existing resale
  */
 router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const existing = database_1.default.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
+    const existing = database_1.default.prepare('SELECT id, origin_factory FROM material_resales WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Resale not found', 404, 'NOT_FOUND');
     const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
+    // Reassigning the shipment to a different supplier invalidates any payments
+    // already applied to it under the old supplier's account — those allocation
+    // rows are removed and their money returns to the old supplier's net
+    // balance (which is recomputed live from the tables).
+    if ((originFactory || '') !== (existing.origin_factory || '')) {
+        database_1.default.prepare(`DELETE FROM supplier_payment_allocations WHERE target_type = 'resale' AND target_id = ?`).run(req.params.id);
+        database_1.default.prepare('UPDATE material_resales SET supplier_paid = 0 WHERE id = ?').run(req.params.id);
+    }
     const trips = (0, resale_math_1.resaleTripCount)({ tripCount });
     const invoiceTotal = (0, resale_math_1.calcInvoiceTotal)({
         factoryPurchasePrice, productUnitPrice: productUnitPrice || 0,
@@ -176,7 +184,16 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Resale not found', 404, 'NOT_FOUND');
-    database_1.default.prepare('DELETE FROM material_resales WHERE id = ?').run(req.params.id);
+    // Allocation rows have no FK to this table (loose linkage, like the other
+    // ledgers) — remove the ones pointing at the deleted shipment so payment
+    // histories don't reference a record that no longer exists.
+    const deleteTx = database_1.default.transaction(() => {
+        database_1.default.prepare(`DELETE FROM supplier_payment_allocations WHERE target_type = 'resale' AND target_id = ?`).run(req.params.id);
+        database_1.default.prepare(`DELETE FROM driver_payment_allocations WHERE trip_type = 'resale' AND trip_id = ?`).run(req.params.id);
+        database_1.default.prepare(`DELETE FROM client_payment_allocations WHERE trip_type = 'resale' AND trip_id = ?`).run(req.params.id);
+        database_1.default.prepare('DELETE FROM material_resales WHERE id = ?').run(req.params.id);
+    });
+    deleteTx();
     (0, replicator_1.queueSync)('material_resales', req.params.id, 'delete', null);
     res.json({ success: true, message: 'Resale deleted' });
 }));

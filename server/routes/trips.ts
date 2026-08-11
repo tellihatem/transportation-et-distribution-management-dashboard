@@ -168,7 +168,15 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
   if (!existing) throw createApiError('Trip not found', 404, 'NOT_FOUND');
 
-  db.prepare('DELETE FROM client_trips WHERE id = ?').run(req.params.id);
+  // Allocation rows have no FK to this table — remove the ones pointing at
+  // the deleted trip so payment histories don't reference a record that no
+  // longer exists.
+  const deleteTx = db.transaction(() => {
+    db.prepare(`DELETE FROM driver_payment_allocations WHERE trip_type = 'transport' AND trip_id = ?`).run(req.params.id);
+    db.prepare(`DELETE FROM client_payment_allocations WHERE trip_type = 'transport' AND trip_id = ?`).run(req.params.id);
+    db.prepare('DELETE FROM client_trips WHERE id = ?').run(req.params.id);
+  });
+  deleteTx();
   queueSync('client_trips', req.params.id, 'delete', null);
 
   res.json({ success: true, message: 'Trip deleted' });

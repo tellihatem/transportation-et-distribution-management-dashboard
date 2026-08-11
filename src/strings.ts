@@ -138,6 +138,8 @@ export const T = {
     quickLinkClients: "تسجيل دفعات وتصفية حسابات العملاء",
     /** Quick link: go to the driver settlements screen. */
     quickLinkDrivers: "تسوية أجور ومستحقات السائقين",
+    /** Quick link: go to the supplier accounts screen. */
+    quickLinkSuppliers: "إدارة أرصدة وديون الموردين",
     /** Quick links that show a record count in brackets. */
     quickLinkTrips: (count: number) => `سجل رحلات نقل العملاء (${count})`,
     quickLinkResales: (count: number) => `سجل عمليات بيع المواد (${count})`,
@@ -372,6 +374,128 @@ export const T = {
   },
 
   /* ────────────────────────────────────────────────────────────────────────
+   *  حسابات الموردين — Supplier/factory accounts tab
+   *  Tracks the company's position with each supplier: goods bought from it
+   *  (via resale records and manual invoices), payments made to it, the
+   *  outstanding debt and any prepaid credit it is holding.
+   * ──────────────────────────────────────────────────────────────────────── */
+  supplierAccounts: {
+    /* --- The four summary cards at the top --- */
+    kpiPrepaid: "الأرصدة المسبقة لدى الموردين",
+    kpiPrepaidHint: "مبالغ دفعت مقدماً ولم تُستهلك بالبضائع بعد",
+    kpiDebt: "الديون المستحقة للموردين",
+    kpiDebtHint: "قيمة بضائع استلمت ولم تسدد بعد",
+    kpiOwed: "إجمالي المشتريات من الموردين",
+    kpiOwedHint: "كلفة البضائع عبر الشحنات والفواتير",
+    kpiPaid: "إجمالي المدفوع للموردين",
+    kpiPaidHint: "الدفعات المسبقة والتسديدات المسلمة فعلياً",
+
+    /* --- Search box and the two action buttons --- */
+    searchPlaceholder: "بحث باسم المورد أو المصنع...",
+    recordPaymentButton: "تسجيل دفعة لمورد (مسبقة / تسديد)",
+    recordInvoiceButton: "تسجيل دين / فاتورة مورد",
+
+    /* --- Column headings of the supplier list --- */
+    colName: "المورد / المصنع",
+    colOwed: "إجمالي المشتريات",
+    colPaid: "إجمالي المدفوع",
+    colDebt: "الدين المستحق",
+    colPrepaid: "الرصيد المسبق",
+    colShipments: "الشحنات والفواتير",
+    colActions: "الإجراءات",
+
+    /* --- States and per-row text --- */
+    loading: "جارٍ تحميل حسابات الموردين...",
+    empty: "لا توجد بيانات حسابات موردين تطابق البحث.",
+    /** Shown instead of an amount when nothing is owed to the supplier. */
+    settled: "خالص",
+    /** Shipments cell, e.g. "٣ شحنة (١ غير مسددة)". */
+    shipmentsCell: (unpaid: number) => `شحنة/فاتورة (${unpaid} غير مسددة)`,
+    /** Row buttons. */
+    payAction: "دفع / تسديد",
+    statementAction: "كشف حساب",
+
+    /* --- "Pay a supplier" dialog --- */
+    paymentModalTitle: "تسجيل دفعة لمورد",
+    fieldReceiptNo: "رقم الوصل",
+    fieldDate: "التاريخ",
+    fieldSupplierName: "اسم المورد / المصنع",
+    fieldSupplierNamePlaceholder: "أدخل اسم المورد كما هو في سجل الشحنات",
+    fieldAmount: "المبلغ المدفوع (دج)",
+    fieldPaymentType: "نوع الدفعة",
+    /** The kinds of payment a supplier can receive. Stored in the database. */
+    paymentTypePrepay: "دفعة مسبقة",
+    paymentTypeRepay: "تسديد مستحقات",
+    /** How the money should be applied to unpaid shipments/invoices. */
+    allocationLabel: "طريقة تطبيق الدفعة",
+    allocationAuto: "تلقائي (تسديد الأقدم فالأقدم)",
+    allocationAutoHint: "تسديد الشحنات والفواتير غير المسددة الأقدم أولاً",
+    allocationNone: "دفعة مسبقة (رصيد لدى المورد)",
+    allocationNoneHint: "الاحتفاظ بالمبلغ كرصيد مسبق يُخصم منه عند استلام البضائع",
+    fieldNotes: "ملاحظات / تفاصيل",
+    fieldNotesPlaceholder: "تفاصيل إضافية عن الدفعة...",
+    cancel: "إلغاء",
+    saving: "جاري التسجيل...",
+    save: "حفظ وتأكيد الدفعة",
+    saveError: (message: string) => `خطأ أثناء تسجيل دفعة المورد: ${message}`,
+
+    /* --- "Record a supplier debt/invoice" dialog --- */
+    invoiceModalTitle: "تسجيل دين / فاتورة مورد",
+    invoiceHint: "بضاعة استلمت من المورد دون تسجيل عملية بيع — تُسجل هنا كدين عليه حتى تسدد.",
+    fieldInvoiceNo: "رقم الفاتورة",
+    fieldInvoiceAmount: "قيمة البضاعة المستلمة (دج)",
+    invoiceNotesPlaceholder: "وصف البضاعة أو مرجع الفاتورة...",
+    invoiceSave: "تسجيل الدين",
+    invoiceSaveError: (message: string) => `خطأ أثناء تسجيل فاتورة المورد: ${message}`,
+
+    /* --- "Statement of account" dialog (on screen) --- */
+    statementTitle: "كشف حساب المورد:",
+    printButton: "طباعة الكشف",
+    statementLoading: "جارٍ تحميل بيانات كشف حساب المورد...",
+    statementEmpty: "لم يتم العثور على بيانات لهذا المورد.",
+    stmtTotalOwed: "إجمالي المشتريات",
+    stmtTotalPaid: "إجمالي المدفوع فعلياً",
+    stmtDebt: "الدين المستحق للمورد",
+    stmtPrepaid: "الرصيد المسبق المتبقي",
+    stmtItemsHeading: (count: number) => `سجل الشحنات والفواتير (${count})`,
+    stmtColDate: "التاريخ",
+    stmtColType: "النوع",
+    stmtColId: "الرقم",
+    stmtColDescription: "البيان",
+    stmtColLoad: "الحمولة",
+    stmtColOwed: "قيمة البضاعة",
+    stmtColPaid: "المسدد",
+    stmtColRemaining: "المتبقي",
+    /** The two kinds of debt a supplier account can hold. */
+    typeResale: "شحنة بيع",
+    typeInvoice: "فاتورة دين",
+    stmtPaymentsHeading: (count: number) => `سجل الدفعات للمورد (${count})`,
+    stmtPayColReceipt: "رقم الوصل",
+    stmtPayColDate: "التاريخ",
+    stmtPayColType: "نوع الدفعة",
+    stmtPayColAmount: "المبلغ",
+    stmtPayColNotes: "ملاحظات",
+    stmtNoPayments: "لا توجد دفعات مسجلة بعد.",
+
+    /* --- The printed version of the statement (paper output) --- */
+    printTitle: "كشف حساب المورد",
+    printSupplierLabel: "المورد:",
+    printSummaryOwed: "إجمالي المشتريات",
+    printSummaryPaid: "إجمالي المدفوع",
+    printSummaryDebt: "الدين المستحق",
+    printSummaryPrepaid: "الرصيد المسبق",
+    printItemsHeading: (count: number) => `سجل الشحنات والفواتير (${count})`,
+    printColType: "النوع",
+    printColId: "الرقم",
+    printColOwed: "القيمة",
+    printColPaid: "المسدد",
+    printColRemaining: "المتبقي",
+    printPaymentsHeading: (count: number) => `سجل الدفعات (${count})`,
+    printNoPayments: "لا توجد دفعات مسجلة بعد",
+    printSignSupplier: "توقيع المورد",
+  },
+
+  /* ────────────────────────────────────────────────────────────────────────
    *  مشترك بين المستندات المطبوعة — Shared wording on printed documents
    * ──────────────────────────────────────────────────────────────────────── */
   printCommon: {
@@ -529,6 +653,7 @@ export const T = {
     resale: "بيع وتوصيل المواد",
     clients: "حسابات العملاء",
     drivers: "تسوية حسابات السائقين",
+    suppliers: "حسابات الموردين",
     expenses: "مصاريف الأسطول الأُخرى",
   },
 

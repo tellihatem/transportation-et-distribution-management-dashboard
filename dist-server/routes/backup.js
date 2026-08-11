@@ -27,15 +27,21 @@ const TABLES = [
     'client_payment_allocations',
     'driver_payments',
     'driver_payment_allocations',
+    'supplier_invoices',
+    'supplier_payments',
+    'supplier_payment_allocations',
 ];
 const COLUMNS_BY_TABLE = {
     client_trips: ['id', 'date', 'client_name', 'origin_factory', 'destination', 'material_type', 'total_tonnage', 'quantity_unit', 'truck_cost', 'driver_cut', 'company_profit', 'driver_name', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
-    material_resales: ['id', 'date', 'end_client', 'destination', 'material_type', 'origin_factory', 'factory_purchase_price', 'product_unit_price', 'total_tonnage', 'quantity_unit', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'driver_name', 'trip_count', 'client_paid', 'driver_paid', 'created_at', 'updated_at'],
+    material_resales: ['id', 'date', 'end_client', 'destination', 'material_type', 'origin_factory', 'factory_purchase_price', 'product_unit_price', 'total_tonnage', 'quantity_unit', 'client_selling_price', 'truck_cost', 'driver_cost', 'explicit_profit', 'driver_name', 'trip_count', 'client_paid', 'driver_paid', 'supplier_paid', 'created_at', 'updated_at'],
     expenses: ['id', 'date', 'category', 'truck_plate', 'amount', 'status', 'created_at', 'updated_at'],
     client_payments: ['id', 'date', 'client_name', 'amount', 'payment_method', 'notes', 'created_at', 'updated_at'],
     client_payment_allocations: ['payment_id', 'trip_type', 'trip_id', 'amount', 'created_at'],
     driver_payments: ['id', 'date', 'driver_name', 'amount', 'payment_type', 'notes', 'created_at', 'updated_at'],
     driver_payment_allocations: ['payment_id', 'trip_type', 'trip_id', 'amount', 'created_at'],
+    supplier_invoices: ['id', 'date', 'supplier_name', 'amount', 'notes', 'paid', 'created_at', 'updated_at'],
+    supplier_payments: ['id', 'date', 'supplier_name', 'amount', 'payment_type', 'notes', 'created_at', 'updated_at'],
+    supplier_payment_allocations: ['payment_id', 'target_type', 'target_id', 'amount', 'created_at'],
 };
 // Defaults for columns that may be absent in backups from older app versions
 const COLUMN_FALLBACKS = {
@@ -49,6 +55,8 @@ const COLUMN_FALLBACKS = {
     trip_count: 1,
     client_paid: 0,
     driver_paid: 0,
+    supplier_paid: 0,
+    paid: 0,
 };
 /**
  * GET /api/backup/export — Downloads a full JSON snapshot of all business tables
