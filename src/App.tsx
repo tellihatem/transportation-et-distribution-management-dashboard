@@ -32,7 +32,8 @@ import {
   MapPin,
   Tag,
   Download,
-  Upload
+  Upload,
+  Factory
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -58,9 +59,11 @@ import { useResales } from "./hooks/useResales";
 import { useExpenses } from "./hooks/useExpenses";
 import { useClientPayments } from "./hooks/useClientPayments";
 import { useDriverPayments } from "./hooks/useDriverPayments";
+import { useSupplierPayments } from "./hooks/useSupplierPayments";
 import { useAppInfo } from "./hooks/useAppInfo";
 import { ClientAccountsTab } from "./components/ClientAccountsTab";
 import { DriverAccountsTab } from "./components/DriverAccountsTab";
+import { SupplierAccountsTab } from "./components/SupplierAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
 import logoUrl from "../assets/canvas.png";
@@ -125,6 +128,7 @@ export default function App() {
   const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
   const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, reload: reloadClientPayments } = useClientPayments(filters);
   const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, reload: reloadDriverPayments } = useDriverPayments(filters);
+  const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, addInvoice: addSupplierInvoice, reload: reloadSupplierPayments } = useSupplierPayments(filters);
 
   // Which build is running and which database file it opened — shown in the
   // header badge and in the reset dialog.
@@ -135,10 +139,11 @@ export default function App() {
     reloadResales();
     reloadClientPayments();
     reloadDriverPayments();
+    reloadSupplierPayments();
   };
 
   // --- Active Tab State ---
-  const [activeTab, setActiveTab] = useState<"overview" | "transport" | "resale" | "clients" | "drivers" | "expenses">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "transport" | "resale" | "clients" | "drivers" | "suppliers" | "expenses">("overview");
 
   // --- Modals State ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1170,6 +1175,17 @@ export default function App() {
               </button>
 
               <button
+                onClick={() => { setActiveTab("suppliers"); resetFilters(); }}
+                className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "suppliers"
+                  ? "bg-amber-600 text-white shadow-md shadow-amber-600/15"
+                  : "text-slate-400 hover:text-slate-200"
+                  }`}
+              >
+                <Factory className="h-3.5 w-3.5 text-amber-400" />
+                <span>{T.tabs.suppliers}</span>
+              </button>
+
+              <button
                 onClick={() => { setActiveTab("expenses"); resetFilters(); }}
                 className={`flex-1 md:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${activeTab === "expenses"
                   ? "bg-blue-600 text-white shadow-md shadow-blue-600/15"
@@ -1240,6 +1256,25 @@ export default function App() {
                   filters={filters}
                   onRecordPayment={recordDriverPayment}
                   onRefreshTrips={refreshAllData}
+                />
+              </motion.div>
+            )}
+
+            {/* TAB SUPPLIERS: SUPPLIER/FACTORY BALANCES & DEBTS */}
+            {activeTab === "suppliers" && (
+              <motion.div
+                key="tab-suppliers"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+              >
+                <SupplierAccountsTab
+                  summaries={supplierSummaries}
+                  loading={false}
+                  filters={filters}
+                  onRecordPayment={recordSupplierPayment}
+                  onRecordInvoice={addSupplierInvoice}
+                  onRefresh={refreshAllData}
                 />
               </motion.div>
             )}

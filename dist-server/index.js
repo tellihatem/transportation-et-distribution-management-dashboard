@@ -65,6 +65,7 @@ const sync_1 = __importDefault(require("./routes/sync"));
 const backup_1 = __importDefault(require("./routes/backup"));
 const client_payments_1 = __importDefault(require("./routes/client-payments"));
 const driver_payments_1 = __importDefault(require("./routes/driver-payments"));
+const suppliers_1 = require("./routes/suppliers");
 const app = (0, express_1.default)();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 let httpServer = null;
@@ -190,6 +191,8 @@ app.use('/api/resales', resales_1.default);
 app.use('/api/expenses', expenses_1.default);
 app.use('/api/client-payments', client_payments_1.default);
 app.use('/api/driver-payments', driver_payments_1.default);
+app.use('/api/supplier-payments', suppliers_1.supplierPaymentsRouter);
+app.use('/api/supplier-invoices', suppliers_1.supplierInvoicesRouter);
 app.use('/api/sync', sync_1.default);
 app.use('/api/backup', backup_1.default);
 // --- Serve React Frontend (Electron/Production mode) ---

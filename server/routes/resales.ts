@@ -164,10 +164,19 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
  * PUT /api/resales/:id — Update existing resale
  */
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT id, origin_factory FROM material_resales WHERE id = ?').get(req.params.id) as any;
   if (!existing) throw createApiError('Resale not found', 404, 'NOT_FOUND');
 
   const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
+
+  // Reassigning the shipment to a different supplier invalidates any payments
+  // already applied to it under the old supplier's account — those allocation
+  // rows are removed and their money returns to the old supplier's net
+  // balance (which is recomputed live from the tables).
+  if ((originFactory || '') !== (existing.origin_factory || '')) {
+    db.prepare(`DELETE FROM supplier_payment_allocations WHERE target_type = 'resale' AND target_id = ?`).run(req.params.id);
+    db.prepare('UPDATE material_resales SET supplier_paid = 0 WHERE id = ?').run(req.params.id);
+  }
 
   const trips = resaleTripCount({ tripCount });
   const invoiceTotal = calcInvoiceTotal({
@@ -197,7 +206,16 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
   if (!existing) throw createApiError('Resale not found', 404, 'NOT_FOUND');
 
-  db.prepare('DELETE FROM material_resales WHERE id = ?').run(req.params.id);
+  // Allocation rows have no FK to this table (loose linkage, like the other
+  // ledgers) — remove the ones pointing at the deleted shipment so payment
+  // histories don't reference a record that no longer exists.
+  const deleteTx = db.transaction(() => {
+    db.prepare(`DELETE FROM supplier_payment_allocations WHERE target_type = 'resale' AND target_id = ?`).run(req.params.id);
+    db.prepare(`DELETE FROM driver_payment_allocations WHERE trip_type = 'resale' AND trip_id = ?`).run(req.params.id);
+    db.prepare(`DELETE FROM client_payment_allocations WHERE trip_type = 'resale' AND trip_id = ?`).run(req.params.id);
+    db.prepare('DELETE FROM material_resales WHERE id = ?').run(req.params.id);
+  });
+  deleteTx();
   queueSync('material_resales', req.params.id, 'delete', null);
 
   res.json({ success: true, message: 'Resale deleted' });

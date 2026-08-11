@@ -44,7 +44,9 @@ export async function restoreFromSupabase(): Promise<RestoreResult> {
   const ledgerRows = (db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM client_payments) +
-      (SELECT COUNT(*) FROM driver_payments) AS total
+      (SELECT COUNT(*) FROM driver_payments) +
+      (SELECT COUNT(*) FROM supplier_payments) +
+      (SELECT COUNT(*) FROM supplier_invoices) AS total
   `).get() as { total: number }).total;
 
   if (ledgerRows > 0) {

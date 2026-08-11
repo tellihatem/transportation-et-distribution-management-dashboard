@@ -148,7 +148,15 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Trip not found', 404, 'NOT_FOUND');
-    database_1.default.prepare('DELETE FROM client_trips WHERE id = ?').run(req.params.id);
+    // Allocation rows have no FK to this table — remove the ones pointing at
+    // the deleted trip so payment histories don't reference a record that no
+    // longer exists.
+    const deleteTx = database_1.default.transaction(() => {
+        database_1.default.prepare(`DELETE FROM driver_payment_allocations WHERE trip_type = 'transport' AND trip_id = ?`).run(req.params.id);
+        database_1.default.prepare(`DELETE FROM client_payment_allocations WHERE trip_type = 'transport' AND trip_id = ?`).run(req.params.id);
+        database_1.default.prepare('DELETE FROM client_trips WHERE id = ?').run(req.params.id);
+    });
+    deleteTx();
     (0, replicator_1.queueSync)('client_trips', req.params.id, 'delete', null);
     res.json({ success: true, message: 'Trip deleted' });
 }));

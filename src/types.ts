@@ -226,3 +226,82 @@ export interface DriverStatement {
   }>;
 }
 
+// Supplier/Factory Ledger — debts arise from resales bought from the supplier
+// (matched on originFactory) plus manual invoices; payments net against the
+// combined total. Mirrors the driver ledger shapes.
+export interface SupplierPaymentAllocation {
+  id?: number;
+  paymentId?: string;
+  targetType: 'resale' | 'invoice';
+  targetId: string;
+  amount: number;
+}
+
+export interface SupplierPayment {
+  id: string;
+  date: string;
+  supplierName: string;
+  amount: number;
+  paymentType: string; // label from strings: prepayment / debt repayment
+  notes: string;
+  allocatedAmount?: number;
+  unallocatedAmount?: number;
+  allocations?: SupplierPaymentAllocation[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** A manual debt: goods received from a supplier outside any resale record. */
+export interface SupplierInvoice {
+  id: string;
+  date: string;
+  supplierName: string;
+  amount: number;
+  notes: string;
+  paid: number;
+  remaining: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SupplierSummary {
+  supplierName: string;
+  totalOwed: number;
+  totalPaymentsGiven: number;
+  totalAllocatedPaid: number;
+  outstandingDebt: number;   // max(0, owed − paid): net semantics
+  prepaidBalance: number;    // max(0, paid − owed)
+  shipmentsCount: number;
+  unpaidCount: number;
+}
+
+export interface SupplierStatement {
+  supplierName: string;
+  summary: {
+    totalOwed: number;
+    totalPaymentsGiven: number;
+    totalAllocatedPaid: number;
+    outstandingDebt: number;
+    prepaidBalance: number;
+  };
+  itemized: Array<{
+    type: 'resale' | 'invoice';
+    id: string;
+    date: string;
+    description: string;
+    endClient: string;
+    totalTonnage: number;
+    quantityUnit: string;
+    owed: number;
+    paid: number;
+    remaining: number;
+  }>;
+  payments: Array<{
+    id: string;
+    date: string;
+    amount: number;
+    paymentType: string;
+    notes: string;
+  }>;
+}
+
