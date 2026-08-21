@@ -127,7 +127,7 @@ export default function App() {
   const { resales: resaleTxs, error: resalesError, addResale, editResale, removeResale, reload: reloadResales } = useResales(filters);
   const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
   const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, reload: reloadClientPayments } = useClientPayments(filters);
-  const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, reload: reloadDriverPayments } = useDriverPayments(filters);
+  const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, updatePayment: updateDriverPaymentRecord, removePayment: removeDriverPaymentRecord, reload: reloadDriverPayments } = useDriverPayments(filters);
   const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, addInvoice: addSupplierInvoice, deductAdvance: deductSupplierAdvance, reload: reloadSupplierPayments } = useSupplierPayments(filters);
 
   // Which build is running and which database file it opened — shown in the
@@ -1255,6 +1255,8 @@ export default function App() {
                   loading={false}
                   filters={filters}
                   onRecordPayment={recordDriverPayment}
+                  onUpdatePayment={updateDriverPaymentRecord}
+                  onDeletePayment={removeDriverPaymentRecord}
                   onRefreshTrips={refreshAllData}
                 />
               </motion.div>

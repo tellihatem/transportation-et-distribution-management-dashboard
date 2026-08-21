@@ -287,39 +287,8 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
         remainingToAllocate -= allocAmt;
       }
     } else if (allocationMode === 'auto') {
-      // Auto FIFO: fetch unpaid/partially paid trips for this driver ordered by date ASC
-      const trips = db.prepare(`
-        SELECT id, 'transport' as trip_type, date, driver_cut as total_wage, driver_paid
-        FROM client_trips
-        WHERE driver_name = ? AND driver_paid < driver_cut
-        ORDER BY date ASC
-      `).all(driverName) as any[];
-
-      const resales = db.prepare(`
-        SELECT id, 'resale' as trip_type, date, ${RESALE_DRIVER_WAGE_SQL} as total_wage, driver_paid
-        FROM material_resales
-        WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL}
-        ORDER BY date ASC
-      `).all(driverName) as any[];
-
-      const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
-
-      for (const item of combinedUnpaid) {
-        if (remainingToAllocate <= 0) break;
-
-        const due = item.total_wage - (item.driver_paid ?? 0);
-        if (due <= 0) continue;
-
-        const allocAmt = Math.min(due, remainingToAllocate);
-
-        db.prepare(`
-          INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, item.trip_type, item.id, allocAmt);
-
-        syncTripDriverPaid(item.trip_type, item.id);
-        remainingToAllocate -= allocAmt;
-      }
+      // Same routine the correction path uses, so the two cannot diverge.
+      remainingToAllocate = allocateFifo(id, driverName, remainingToAllocate);
     }
   });
 
@@ -329,6 +298,106 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   queueSync('driver_payments', id, 'upsert', created);
 
   res.status(201).json({ success: true, data: created });
+}));
+
+/**
+ * Spread an amount over a driver's unpaid trips and resales, oldest first,
+ * writing allocation rows and refreshing each target's paid cache.
+ *
+ * Shared by POST and PUT so a corrected payment is allocated by exactly the
+ * same rule as the original — an edit must never leave the ledger in a state
+ * the original could not have produced. Returns what could not be placed,
+ * which stays on the driver's account as an advance.
+ */
+function allocateFifo(paymentId: string, driverName: string, amount: number): number {
+  const trips = db.prepare(`
+    SELECT id, 'transport' as trip_type, date, driver_cut as total_wage, driver_paid
+    FROM client_trips
+    WHERE driver_name = ? AND driver_paid < driver_cut
+    ORDER BY date ASC
+  `).all(driverName) as any[];
+
+  const resales = db.prepare(`
+    SELECT id, 'resale' as trip_type, date, ${RESALE_DRIVER_WAGE_SQL} as total_wage, driver_paid
+    FROM material_resales
+    WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL}
+    ORDER BY date ASC
+  `).all(driverName) as any[];
+
+  const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
+
+  let remaining = amount;
+  for (const item of combinedUnpaid) {
+    if (remaining <= 0) break;
+
+    const due = item.total_wage - (item.driver_paid ?? 0);
+    if (due <= 0) continue;
+
+    const allocAmt = Math.min(due, remaining);
+
+    db.prepare(`
+      INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
+      VALUES (?, ?, ?, ?)
+    `).run(paymentId, item.trip_type, item.id, allocAmt);
+
+    syncTripDriverPaid(item.trip_type, item.id);
+    remaining -= allocAmt;
+  }
+
+  return remaining;
+}
+
+/**
+ * PUT /api/driver-payments/:id — Correct a payment that was entered wrongly
+ *
+ * A wrong amount cannot simply be overwritten: the original may already have
+ * been spread across several trips. So the old allocations are removed first
+ * and every trip they touched is recalculated, then the corrected amount is
+ * allocated afresh. Trips the payment used to cover are refreshed even when
+ * the new allocation no longer reaches them, which is what makes reducing an
+ * amount — or moving the payment to a different driver — come out right.
+ */
+router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
+  const paymentId = req.params.id;
+
+  const existing = db.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId) as any;
+  if (!existing) throw createApiError('Payment not found', 404, 'NOT_FOUND');
+
+  const { date, driverName, amount, paymentType, notes, allocationMode } = req.body;
+
+  if (!date || !driverName || !amount || amount <= 0) {
+    throw createApiError('Missing required fields: date, driverName, amount', 400, 'VALIDATION_ERROR');
+  }
+
+  const updateTx = db.transaction(() => {
+    // Remember what the old allocations touched so those trips can be
+    // recalculated even if the corrected payment no longer reaches them.
+    const previous = db.prepare(`
+      SELECT trip_type, trip_id FROM driver_payment_allocations WHERE payment_id = ?
+    `).all(paymentId) as any[];
+
+    db.prepare('DELETE FROM driver_payment_allocations WHERE payment_id = ?').run(paymentId);
+    for (const alloc of previous) {
+      syncTripDriverPaid(alloc.trip_type, alloc.trip_id);
+    }
+
+    db.prepare(`
+      UPDATE driver_payments
+      SET date = ?, driver_name = ?, amount = ?, payment_type = ?, notes = ?,
+          updated_at = datetime('now'), synced_at = NULL
+      WHERE id = ?
+    `).run(date, driverName, amount, paymentType || 'Settlement', notes || '', paymentId);
+
+    // 'none' leaves the money unallocated — an advance, same as on create.
+    if (allocationMode === 'auto') {
+      allocateFifo(paymentId, driverName, amount);
+    }
+  });
+
+  updateTx();
+
+  const updated = db.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId);
+  res.json({ success: true, data: updated });
 }));
 
 /**

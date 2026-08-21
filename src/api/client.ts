@@ -355,6 +355,25 @@ export async function createDriverPayment(payload: {
   });
 }
 
+/**
+ * Correct a driver payment that was entered wrongly. The server re-spreads
+ * the corrected amount across the driver's trips, so the trip-level figures
+ * follow the correction automatically.
+ */
+export async function updateDriverPayment(id: string, payload: {
+  date: string;
+  driverName: string;
+  amount: number;
+  paymentType?: string;
+  notes?: string;
+  allocationMode: 'auto' | 'none';
+}): Promise<import('../types').DriverPayment> {
+  return request<import('../types').DriverPayment>(`/driver-payments/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function deleteDriverPayment(id: string): Promise<void> {
   return request(`/driver-payments/${id}`, { method: 'DELETE' });
 }

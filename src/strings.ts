@@ -354,6 +354,24 @@ export const T = {
     stmtPayColNotes: "ملاحظات",
     stmtNoPayouts: "لا توجد تصفيات أو سلف مسجلة بعد.",
 
+    /* --- Correcting or removing a payment already recorded --- */
+    /** Column holding the edit/delete buttons in the payments history. */
+    stmtPayColActions: "تعديل",
+    editPaymentAction: "تعديل",
+    deletePaymentAction: "حذف",
+    /** Title of the dialog when correcting an existing payment. */
+    editModalTitle: "تعديل دفعة مسجلة للسائق",
+    /** Explains that trip settlements follow the correction automatically. */
+    editHint: "سيُعاد توزيع المبلغ المصحّح على رحلات السائق تلقائياً، وتتحدث المبالغ المسددة لكل رحلة تبعاً لذلك.",
+    editSave: "حفظ التعديل",
+    editSaving: "جاري التعديل...",
+    editError: (message: string) => `تعذر تعديل الدفعة: ${message}`,
+    /** Asked before removing a payment; the amount is shown so the operator
+     *  can see exactly which record is about to disappear. */
+    deleteConfirm: (id: string, amount: string) =>
+      `حذف الدفعة ${id} بقيمة ${amount} دج نهائياً؟\n\nسيُلغى تسديدها للرحلات وتعود تلك الرحلات غير مسددة.`,
+    deleteError: (message: string) => `تعذر حذف الدفعة: ${message}`,
+
     /* --- The printed version of the statement (paper output) --- */
     printTitle: "كشف حساب أجور ومستحقات السائق",
     printDriverLabel: "السائق:",

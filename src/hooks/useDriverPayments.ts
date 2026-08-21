@@ -8,6 +8,7 @@ import {
   fetchDriverPayments,
   fetchDriverSummaries,
   createDriverPayment,
+  updateDriverPayment,
   deleteDriverPayment
 } from '../api/client';
 
@@ -56,6 +57,20 @@ export function useDriverPayments(filters?: TabFilters) {
     return created;
   }, [load]);
 
+  /** Correct a payment entered with the wrong amount, date, driver or note. */
+  const updatePayment = useCallback(async (id: string, payload: {
+    date: string;
+    driverName: string;
+    amount: number;
+    paymentType?: string;
+    notes?: string;
+    allocationMode: 'auto' | 'none';
+  }) => {
+    const updated = await updateDriverPayment(id, payload);
+    await load();
+    return updated;
+  }, [load]);
+
   const removePayment = useCallback(async (id: string) => {
     await deleteDriverPayment(id);
     await load();
@@ -68,6 +83,7 @@ export function useDriverPayments(filters?: TabFilters) {
     error,
     reload: load,
     recordPayment,
+    updatePayment,
     removePayment
   };
 }
