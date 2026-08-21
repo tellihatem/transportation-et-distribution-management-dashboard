@@ -200,7 +200,11 @@ router.get('/statement/:clientName', (0, error_handler_1.asyncHandler)(async (re
                 date: p.date,
                 amount: p.amount,
                 paymentMethod: p.payment_method ?? 'Cash',
-                notes: p.notes ?? ''
+                notes: p.notes ?? '',
+                // How much of this payment is currently applied to shipments/trips.
+                // The edit dialog reads it so correcting an unapplied advance does not
+                // silently turn it into a settlement.
+                allocatedAmount: database_1.default.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM client_payment_allocations WHERE payment_id = ?').get(p.id).total
             }))
         }
     });
@@ -247,34 +251,8 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
             }
         }
         else if (allocationMode === 'auto') {
-            // Auto FIFO: fetch unpaid/partially paid trips for this client ordered by date ASC
-            const trips = database_1.default.prepare(`
-        SELECT id, 'transport' as trip_type, date, (truck_cost + driver_cut + company_profit) as total_fee, client_paid
-        FROM client_trips
-        WHERE client_name = ? AND client_paid < (truck_cost + driver_cut + company_profit)
-        ORDER BY date ASC
-      `).all(clientName);
-            const resales = database_1.default.prepare(`
-        SELECT id, 'resale' as trip_type, date, client_selling_price as total_fee, client_paid
-        FROM material_resales
-        WHERE end_client = ? AND client_paid < client_selling_price
-        ORDER BY date ASC
-      `).all(clientName);
-            const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
-            for (const item of combinedUnpaid) {
-                if (remainingToAllocate <= 0)
-                    break;
-                const due = item.total_fee - (item.client_paid ?? 0);
-                if (due <= 0)
-                    continue;
-                const allocAmt = Math.min(due, remainingToAllocate);
-                database_1.default.prepare(`
-          INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, item.trip_type, item.id, allocAmt);
-                syncTripClientPaid(item.trip_type, item.id);
-                remainingToAllocate -= allocAmt;
-            }
+            // Same routine the correction path uses, so the two cannot diverge.
+            remainingToAllocate = allocateFifo(id, clientName, remainingToAllocate);
         }
     });
     executePaymentTx();
@@ -285,6 +263,85 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
 /**
  * DELETE /api/client-payments/:id — Delete client payment and rollback allocations
  */
+/**
+ * Spread an amount over a client's unpaid trips and resales, oldest first,
+ * writing allocation rows and refreshing each target's paid cache.
+ *
+ * Shared by POST and PUT so a corrected receipt is allocated by exactly the
+ * same rule as the original. Returns what could not be placed, which stays
+ * on the client's account as unallocated credit.
+ */
+function allocateFifo(paymentId, clientName, amount) {
+    const trips = database_1.default.prepare(`
+    SELECT id, 'transport' as trip_type, date, (truck_cost + driver_cut + company_profit) as total_fee, client_paid
+    FROM client_trips
+    WHERE client_name = ? AND client_paid < (truck_cost + driver_cut + company_profit)
+    ORDER BY date ASC
+  `).all(clientName);
+    const resales = database_1.default.prepare(`
+    SELECT id, 'resale' as trip_type, date, client_selling_price as total_fee, client_paid
+    FROM material_resales
+    WHERE end_client = ? AND client_paid < client_selling_price
+    ORDER BY date ASC
+  `).all(clientName);
+    const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
+    let remaining = amount;
+    for (const item of combinedUnpaid) {
+        if (remaining <= 0)
+            break;
+        const due = item.total_fee - (item.client_paid ?? 0);
+        if (due <= 0)
+            continue;
+        const allocAmt = Math.min(due, remaining);
+        database_1.default.prepare(`
+      INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
+      VALUES (?, ?, ?, ?)
+    `).run(paymentId, item.trip_type, item.id, allocAmt);
+        syncTripClientPaid(item.trip_type, item.id);
+        remaining -= allocAmt;
+    }
+    return remaining;
+}
+/**
+ * PUT /api/client-payments/:id — Correct a receipt entered wrongly
+ *
+ * The old allocations are removed and every trip they touched recalculated
+ * before the corrected amount is re-applied, so lowering an amount correctly
+ * returns trips to unpaid rather than leaving them settled by money that is
+ * no longer there.
+ */
+router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const paymentId = req.params.id;
+    const existing = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
+    if (!existing)
+        throw (0, error_handler_1.createApiError)('Payment not found', 404, 'NOT_FOUND');
+    const { date, clientName, amount, paymentMethod, notes, allocationMode } = req.body;
+    if (!date || !clientName || !amount || amount <= 0) {
+        throw (0, error_handler_1.createApiError)('Missing required fields: date, clientName, amount', 400, 'VALIDATION_ERROR');
+    }
+    const updateTx = database_1.default.transaction(() => {
+        const previous = database_1.default.prepare(`
+      SELECT trip_type, trip_id FROM client_payment_allocations WHERE payment_id = ?
+    `).all(paymentId);
+        database_1.default.prepare('DELETE FROM client_payment_allocations WHERE payment_id = ?').run(paymentId);
+        for (const alloc of previous) {
+            syncTripClientPaid(alloc.trip_type, alloc.trip_id);
+        }
+        database_1.default.prepare(`
+      UPDATE client_payments
+      SET date = ?, client_name = ?, amount = ?, payment_method = ?, notes = ?,
+          updated_at = datetime('now'), synced_at = NULL
+      WHERE id = ?
+    `).run(date, clientName, amount, paymentMethod || 'Cash', notes || '', paymentId);
+        // 'none' leaves the money unallocated — a deposit, same as on create.
+        if (allocationMode === 'auto') {
+            allocateFifo(paymentId, clientName, amount);
+        }
+    });
+    updateTx();
+    const updated = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
+    res.json({ success: true, data: updated });
+}));
 router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const paymentId = req.params.id;
     const existing = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);

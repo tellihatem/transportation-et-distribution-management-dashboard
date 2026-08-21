@@ -241,6 +241,19 @@ export const T = {
     stmtPayColNotes: "ملاحظات",
     stmtNoPayments: "لا توجد دفعات مسجلة بعد.",
 
+    /* --- Correcting or removing a receipt already recorded --- */
+    stmtPayColActions: "إجراءات",
+    editPaymentAction: "تعديل",
+    deletePaymentAction: "حذف",
+    editModalTitle: "تعديل دفعة مسجلة للعميل",
+    editHint: "سيُعاد توزيع المبلغ المصحّح على رحلات العميل تلقائياً، وتتحدث المبالغ المسددة لكل رحلة تبعاً لذلك.",
+    editSave: "حفظ التعديل",
+    editSaving: "جاري التعديل...",
+    editError: (message: string) => `تعذر تعديل الدفعة: ${message}`,
+    deleteConfirm: (id: string, amount: string) =>
+      `حذف الدفعة ${id} بقيمة ${amount} دج نهائياً؟\n\nسيُلغى تسديدها للرحلات وتعود تلك الرحلات غير مسددة.`,
+    deleteError: (message: string) => `تعذر حذف الدفعة: ${message}`,
+
     /* --- The printed version of the statement (paper output) --- */
     printTitle: "كشف حساب تفصيلي",
     printClientLabel: "العميل:",
@@ -353,6 +366,24 @@ export const T = {
     stmtPayColAmount: "المبلغ",
     stmtPayColNotes: "ملاحظات",
     stmtNoPayouts: "لا توجد تصفيات أو سلف مسجلة بعد.",
+
+    /* --- Correcting or removing a payment already recorded --- */
+    /** Column holding the edit/delete buttons in the payments history. */
+    stmtPayColActions: "إجراءات",
+    editPaymentAction: "تعديل",
+    deletePaymentAction: "حذف",
+    /** Title of the dialog when correcting an existing payment. */
+    editModalTitle: "تعديل دفعة مسجلة للسائق",
+    /** Explains that trip settlements follow the correction automatically. */
+    editHint: "سيُعاد توزيع المبلغ المصحّح على رحلات السائق تلقائياً، وتتحدث المبالغ المسددة لكل رحلة تبعاً لذلك.",
+    editSave: "حفظ التعديل",
+    editSaving: "جاري التعديل...",
+    editError: (message: string) => `تعذر تعديل الدفعة: ${message}`,
+    /** Asked before removing a payment; the amount is shown so the operator
+     *  can see exactly which record is about to disappear. */
+    deleteConfirm: (id: string, amount: string) =>
+      `حذف الدفعة ${id} بقيمة ${amount} دج نهائياً؟\n\nسيُلغى تسديدها للرحلات وتعود تلك الرحلات غير مسددة.`,
+    deleteError: (message: string) => `تعذر حذف الدفعة: ${message}`,
 
     /* --- The printed version of the statement (paper output) --- */
     printTitle: "كشف حساب أجور ومستحقات السائق",
@@ -495,6 +526,21 @@ export const T = {
     stmtPayColAmount: "المبلغ",
     stmtPayColNotes: "ملاحظات",
     stmtNoPayments: "لا توجد دفعات مسجلة بعد.",
+
+    /* --- Correcting or removing a payment already recorded --- */
+    stmtPayColActions: "إجراءات",
+    editPaymentAction: "تعديل",
+    deletePaymentAction: "حذف",
+    editModalTitle: "تعديل دفعة مسجلة للمورد",
+    /** Warns that manual deductions taken from this payment will be undone,
+     *  because they spent money the corrected amount may no longer contain. */
+    editHint: "تنبيه: سيُلغى أي خصم سبق أن تم من هذه الدفعة، وتعود تلك الشحنات غير مخصومة ليُعاد خصمها من الرصيد المصحّح.",
+    editSave: "حفظ التعديل",
+    editSaving: "جاري التعديل...",
+    editError: (message: string) => `تعذر تعديل الدفعة: ${message}`,
+    deleteConfirm: (id: string, amount: string) =>
+      `حذف الدفعة ${id} بقيمة ${amount} دج نهائياً؟\n\nسيُلغى أي خصم تم منها وتعود الشحنات المعنية غير مخصومة.`,
+    deleteError: (message: string) => `تعذر حذف الدفعة: ${message}`,
 
     /* --- The printed version of the statement (paper output) --- */
     printTitle: "كشف حساب المورد",

@@ -20,7 +20,9 @@ import {
   X,
   Printer,
   ShieldCheck,
-  ReceiptText
+  ReceiptText,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import type { SupplierSummary, SupplierStatement, TabFilters } from '../types';
 import {
@@ -43,6 +45,8 @@ interface SupplierAccountsTabProps {
     targetId: string;
     amount: number;
   }) => Promise<{ deducted: number; remainingAdvance: number; targetRemaining: number }>;
+  onUpdatePayment: (id: string, payload: any) => Promise<any>;
+  onDeletePayment: (id: string) => Promise<any>;
   onRefresh: () => void;
 }
 
@@ -53,6 +57,8 @@ export function SupplierAccountsTab({
   onRecordPayment,
   onRecordInvoice,
   onDeductAdvance,
+  onUpdatePayment,
+  onDeletePayment,
   onRefresh
 }: SupplierAccountsTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -62,6 +68,18 @@ export function SupplierAccountsTab({
   const [statementData, setStatementData] = useState<SupplierStatement | null>(null);
   const [loadingStatement, setLoadingStatement] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Correcting a payment already recorded. editingId doubles as "the edit
+  // dialog is open", and holds which receipt is being corrected.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    date: '',
+    supplierName: '',
+    amount: 0,
+    paymentType: '',
+    notes: '',
+    allocationMode: 'auto' as 'auto' | 'none',
+  });
 
   // Drawdown box state
   const [isDeductModalOpen, setIsDeductModalOpen] = useState(false);
@@ -229,6 +247,56 @@ export function SupplierAccountsTab({
       alert(T.supplierAccounts.invoiceSaveError(err.message));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openEditForPayment = (p: SupplierStatement['payments'][number], supplierName: string) => {
+    setEditForm({
+      date: p.date,
+      supplierName,
+      amount: p.amount,
+      paymentType: p.paymentType || T.supplierAccounts.paymentTypeRepay,
+      notes: p.notes || '',
+      // A payment that was never applied is an advance; keep it one unless
+      // the owner deliberately switches to auto.
+      allocationMode: p.allocatedAmount > 0 ? 'auto' : 'none',
+    });
+    setEditingId(p.id);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingId || !editForm.supplierName || editForm.amount <= 0) return;
+    setSubmitting(true);
+    try {
+      await onUpdatePayment(editingId, {
+        date: editForm.date,
+        supplierName: editForm.supplierName,
+        amount: Number(editForm.amount),
+        paymentType: editForm.paymentType,
+        notes: editForm.notes,
+        allocationMode: editForm.allocationMode,
+      });
+      setEditingId(null);
+      // The statement is open behind this dialog — refresh it so the
+      // corrected figures replace the old ones immediately.
+      await openStatementForSupplier(editForm.supplierName);
+      onRefresh();
+    } catch (err: any) {
+      alert(T.supplierAccounts.editError(err.message));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeletePayment = async (p: SupplierStatement['payments'][number], supplierName: string) => {
+    if (!confirm(T.supplierAccounts.deleteConfirm(p.id, p.amount.toLocaleString()))) return;
+    try {
+      await onDeletePayment(p.id);
+      await openStatementForSupplier(supplierName);
+      onRefresh();
+    } catch (err: any) {
+      alert(T.supplierAccounts.deleteError(err.message));
     }
   };
 
@@ -790,6 +858,159 @@ export function SupplierAccountsTab({
         </div>
       )}
 
+      {/* CORRECT A RECORDED SUPPLIER PAYMENT
+          Above the statement (z-60) because it is opened from inside it. */}
+      {editingId && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
+            <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
+                <Pencil className="w-5 h-5" />
+                {T.supplierAccounts.editModalTitle}
+              </div>
+              <button
+                onClick={() => setEditingId(null)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-700/50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              <p className="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2">
+                {T.supplierAccounts.editHint}
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldReceiptNo}</label>
+                  <input
+                    type="text"
+                    value={editingId}
+                    disabled
+                    className="w-full bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldDate}</label>
+                  <input
+                    type="date"
+                    value={editForm.date}
+                    onChange={e => setEditForm({ ...editForm, date: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldSupplierName}</label>
+                <input
+                  type="text"
+                  value={editForm.supplierName}
+                  onChange={e => setEditForm({ ...editForm, supplierName: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldAmount}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editForm.amount}
+                    onChange={e => setEditForm({ ...editForm, amount: Number(e.target.value) })}
+                    className="w-full bg-slate-900 border border-amber-700/60 rounded-lg px-3 py-2 text-base text-amber-300 font-bold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldPaymentType}</label>
+                  <select
+                    value={editForm.paymentType}
+                    onChange={e => setEditForm({ ...editForm, paymentType: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                  >
+                    <option value={T.supplierAccounts.paymentTypePrepay}>{T.supplierAccounts.paymentTypePrepay}</option>
+                    <option value={T.supplierAccounts.paymentTypeRepay}>{T.supplierAccounts.paymentTypeRepay}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-2">{T.supplierAccounts.allocationLabel}</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className={`p-3 border rounded-xl cursor-pointer flex flex-col gap-1 transition-all ${
+                    editForm.allocationMode === 'auto'
+                      ? 'bg-emerald-950/40 border-emerald-500 text-emerald-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <input
+                        type="radio"
+                        name="allocModeSupplierEdit"
+                        checked={editForm.allocationMode === 'auto'}
+                        onChange={() => setEditForm({ ...editForm, allocationMode: 'auto' })}
+                        className="accent-emerald-500"
+                      />
+                      {T.supplierAccounts.allocationAuto}
+                    </div>
+                    <span className="text-[11px] opacity-80">{T.supplierAccounts.allocationAutoHint}</span>
+                  </label>
+
+                  <label className={`p-3 border rounded-xl cursor-pointer flex flex-col gap-1 transition-all ${
+                    editForm.allocationMode === 'none'
+                      ? 'bg-blue-950/40 border-blue-500 text-blue-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <input
+                        type="radio"
+                        name="allocModeSupplierEdit"
+                        checked={editForm.allocationMode === 'none'}
+                        onChange={() => setEditForm({ ...editForm, allocationMode: 'none' })}
+                        className="accent-blue-500"
+                      />
+                      {T.supplierAccounts.allocationNone}
+                    </div>
+                    <span className="text-[11px] opacity-80">{T.supplierAccounts.allocationNoneHint}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldNotes}</label>
+                <textarea
+                  rows={2}
+                  value={editForm.notes}
+                  onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setEditingId(null)}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium"
+                >
+                  {T.supplierAccounts.cancel}
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-amber-950/50"
+                >
+                  {submitting ? T.supplierAccounts.editSaving : T.supplierAccounts.editSave}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* STATEMENT MODAL */}
       {isStatementModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
@@ -905,12 +1126,13 @@ export function SupplierAccountsTab({
                             <th className="p-2.5">{T.supplierAccounts.stmtPayColType}</th>
                             <th className="p-2.5">{T.supplierAccounts.stmtPayColAmount}</th>
                             <th className="p-2.5">{T.supplierAccounts.stmtPayColNotes}</th>
+                            <th className="p-2.5">{T.supplierAccounts.stmtPayColActions}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
                           {statementData.payments.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="p-4 text-center text-slate-500">{T.supplierAccounts.stmtNoPayments}</td>
+                              <td colSpan={6} className="p-4 text-center text-slate-500">{T.supplierAccounts.stmtNoPayments}</td>
                             </tr>
                           ) : (
                             statementData.payments.map((p, idx) => (
@@ -920,6 +1142,24 @@ export function SupplierAccountsTab({
                                 <td className="p-2.5 font-medium">{p.paymentType}</td>
                                 <td className="p-2.5 font-mono font-bold text-emerald-400">{p.amount.toLocaleString()} {T.common.currency}</td>
                                 <td className="p-2.5 text-slate-400">{p.notes || '-'}</td>
+                                <td className="p-2.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => openEditForPayment(p, statementData.supplierName)}
+                                      title={T.supplierAccounts.editPaymentAction}
+                                      className="p-1.5 rounded-lg bg-amber-950/40 text-amber-400 hover:bg-amber-900/60 border border-amber-900/60"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeletePayment(p, statementData.supplierName)}
+                                      title={T.supplierAccounts.deletePaymentAction}
+                                      className="p-1.5 rounded-lg bg-red-950/40 text-red-400 hover:bg-red-900/60 border border-red-900/60"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
                               </tr>
                             ))
                           )}
