@@ -65,7 +65,7 @@ import { ClientAccountsTab } from "./components/ClientAccountsTab";
 import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { SupplierAccountsTab } from "./components/SupplierAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
-import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "./api/client";
+import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId, fetchTripById, fetchResaleById } from "./api/client";
 import logoUrl from "../assets/canvas.png";
 import { T } from "./strings";
 import { calcResale } from "../server/resale-math";
@@ -128,7 +128,7 @@ export default function App() {
   const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
   const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, updatePayment: updateClientPaymentRecord, removePayment: removeClientPaymentRecord, reload: reloadClientPayments } = useClientPayments(filters);
   const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, updatePayment: updateDriverPaymentRecord, removePayment: removeDriverPaymentRecord, reload: reloadDriverPayments } = useDriverPayments(filters);
-  const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, updatePayment: updateSupplierPaymentRecord, removePayment: removeSupplierPaymentRecord, addInvoice: addSupplierInvoice, deductAdvance: deductSupplierAdvance, reload: reloadSupplierPayments } = useSupplierPayments(filters);
+  const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, updatePayment: updateSupplierPaymentRecord, removePayment: removeSupplierPaymentRecord, addInvoice: addSupplierInvoice, updateInvoice: updateSupplierInvoiceRecord, removeInvoice: removeSupplierInvoiceRecord, deductAdvance: deductSupplierAdvance, reload: reloadSupplierPayments } = useSupplierPayments(filters);
 
   // Which build is running and which database file it opened — shown in the
   // header badge and in the reset dialog.
@@ -452,6 +452,20 @@ export default function App() {
       setExpenseForm({ ...record });
     }
     setIsModalOpen(true);
+  };
+
+  /**
+   * Open a trip/resale record straight from a statement line. The loaded
+   * lists obey the active date filter and the statement does not, so the
+   * record is fetched by id instead of looked up in them.
+   */
+  const handleEditTripById = async (type: "transport" | "resale", id: string) => {
+    try {
+      const record = type === "transport" ? await fetchTripById(id) : await fetchResaleById(id);
+      handleOpenEdit(record, type);
+    } catch {
+      alert(T.driverAccounts.tripNotFound(id));
+    }
   };
 
   const handleDelete = async (id: string, type?: "transport" | "resale" | "expenses") => {
@@ -1259,6 +1273,7 @@ export default function App() {
                   onRecordPayment={recordDriverPayment}
                   onUpdatePayment={updateDriverPaymentRecord}
                   onDeletePayment={removeDriverPaymentRecord}
+                  onEditTrip={handleEditTripById}
                   onRefreshTrips={refreshAllData}
                 />
               </motion.div>
@@ -1280,6 +1295,8 @@ export default function App() {
                   onUpdatePayment={updateSupplierPaymentRecord}
                   onDeletePayment={removeSupplierPaymentRecord}
                   onRecordInvoice={addSupplierInvoice}
+                  onUpdateInvoice={updateSupplierInvoiceRecord}
+                  onDeleteInvoice={removeSupplierInvoiceRecord}
                   onDeductAdvance={deductSupplierAdvance}
                   onRefresh={refreshAllData}
                 />

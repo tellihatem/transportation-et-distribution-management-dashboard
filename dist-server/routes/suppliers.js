@@ -591,3 +591,42 @@ exports.supplierInvoicesRouter.delete('/:id', (0, error_handler_1.asyncHandler)(
     deleteTx();
     res.json({ success: true, message: 'Supplier invoice deleted and allocations reverted' });
 }));
+/**
+ * PUT /api/supplier-invoices/:id — Correct an invoice entered wrongly
+ *
+ * Deductions already applied to this invoice are kept whenever they are still
+ * true: raising a mistyped 50,000 to 500,000 does not undo the 50,000 that was
+ * genuinely paid against it. They are dropped only when they can no longer be
+ * true — the invoice now belongs to a different supplier, or its amount fell
+ * below what was already applied to it.
+ */
+exports.supplierInvoicesRouter.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const invoiceId = req.params.id;
+    const existing = database_1.default.prepare('SELECT * FROM supplier_invoices WHERE id = ?').get(invoiceId);
+    if (!existing)
+        throw (0, error_handler_1.createApiError)('Invoice not found', 404, 'NOT_FOUND');
+    const { date, supplierName, amount, notes } = req.body;
+    if (!date || !supplierName || !amount || amount <= 0) {
+        throw (0, error_handler_1.createApiError)('Missing required fields: date, supplierName, amount', 400, 'VALIDATION_ERROR');
+    }
+    const allocated = database_1.default.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payment_allocations WHERE target_type = 'invoice' AND target_id = ?`).get(invoiceId).total;
+    const supplierChanged = supplierName !== existing.supplier_name;
+    const shrankBelowPaid = amount < allocated;
+    const dropAllocations = supplierChanged || shrankBelowPaid;
+    const updateTx = database_1.default.transaction(() => {
+        if (dropAllocations) {
+            database_1.default.prepare(`DELETE FROM supplier_payment_allocations WHERE target_type = 'invoice' AND target_id = ?`).run(invoiceId);
+        }
+        database_1.default.prepare(`
+      UPDATE supplier_invoices
+      SET date = ?, supplier_name = ?, amount = ?, notes = ?, paid = ?, updated_at = datetime('now'), synced_at = NULL
+      WHERE id = ?
+    `).run(date, supplierName, amount, notes || '', dropAllocations ? 0 : allocated, invoiceId);
+    });
+    updateTx();
+    res.json({
+        success: true,
+        data: database_1.default.prepare('SELECT * FROM supplier_invoices WHERE id = ?').get(invoiceId),
+        meta: { allocationsReverted: dropAllocations }
+    });
+}));
