@@ -12,6 +12,7 @@ import {
   updateSupplierPayment,
   deleteSupplierPayment,
   createSupplierInvoice,
+  updateSupplierInvoice,
   deleteSupplierInvoice,
   deductFromSupplierAdvance
 } from '../api/client';
@@ -91,6 +92,18 @@ export function useSupplierPayments(filters?: TabFilters) {
     return created;
   }, [load]);
 
+  /** Correct a debt/invoice entered wrongly. */
+  const updateInvoice = useCallback(async (id: string, payload: {
+    date: string;
+    supplierName: string;
+    amount: number;
+    notes?: string;
+  }) => {
+    const updated = await updateSupplierInvoice(id, payload);
+    await load();
+    return updated;
+  }, [load]);
+
   const removeInvoice = useCallback(async (id: string) => {
     await deleteSupplierInvoice(id);
     await load();
@@ -118,6 +131,7 @@ export function useSupplierPayments(filters?: TabFilters) {
     updatePayment,
     removePayment,
     addInvoice,
+    updateInvoice,
     removeInvoice,
     deductAdvance
   };

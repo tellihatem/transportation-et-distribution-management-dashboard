@@ -22,7 +22,8 @@ import {
   UserCheck,
   ShieldAlert,
   Pencil,
-  Trash2
+  Trash2,
+  ExternalLink
 } from 'lucide-react';
 import type { DriverSummary, DriverStatement, TabFilters } from '../types';
 import { fetchDriverStatement, fetchNextDriverPaymentId } from '../api/client';
@@ -34,6 +35,8 @@ interface DriverAccountsTabProps {
   onRecordPayment: (payload: any) => Promise<any>;
   onUpdatePayment: (id: string, payload: any) => Promise<any>;
   onDeletePayment: (id: string) => Promise<any>;
+  /** Opens the trip/resale record itself in the main edit form. */
+  onEditTrip: (type: 'transport' | 'resale', id: string) => void;
   onRefreshTrips: () => void;
 }
 
@@ -44,6 +47,7 @@ export function DriverAccountsTab({
   onRecordPayment,
   onUpdatePayment,
   onDeletePayment,
+  onEditTrip,
   onRefreshTrips
 }: DriverAccountsTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -752,6 +756,7 @@ export function DriverAccountsTab({
                             <th className="p-2.5">{T.driverAccounts.stmtColEarned}</th>
                             <th className="p-2.5">{T.driverAccounts.stmtColPaid}</th>
                             <th className="p-2.5">{T.driverAccounts.stmtColRemaining}</th>
+                            <th className="p-2.5">{T.driverAccounts.stmtColActions}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
@@ -776,6 +781,15 @@ export function DriverAccountsTab({
                                 ) : (
                                   <span className="text-emerald-400">0 {T.common.currency}</span>
                                 )}
+                              </td>
+                              <td className="p-2.5">
+                                <button
+                                  onClick={() => { setIsStatementModalOpen(false); onEditTrip(item.type, item.id); }}
+                                  title={T.driverAccounts.editTripAction}
+                                  className="p-1.5 rounded-lg bg-cyan-950/40 text-cyan-400 hover:bg-cyan-900/60 border border-cyan-900/60"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </button>
                               </td>
                             </tr>
                           ))}

@@ -356,6 +356,10 @@ export const T = {
     stmtColEarned: "حق السائق (الأجر)",
     stmtColPaid: "المدفوع له",
     stmtColRemaining: "المتبقي له",
+    /** Jump straight from a wage line to the trip that produced it. */
+    stmtColActions: "الرحلة",
+    editTripAction: "فتح الرحلة للتعديل",
+    tripNotFound: (id: string) => `تعذر فتح الرحلة ${id} — قد تكون محذوفة.`,
     /** The two kinds of job a driver can be paid for. */
     typeTransport: "نقل",
     typeResale: "توصيل مواد",
@@ -541,6 +545,22 @@ export const T = {
     deleteConfirm: (id: string, amount: string) =>
       `حذف الدفعة ${id} بقيمة ${amount} دج نهائياً؟\n\nسيُلغى أي خصم تم منها وتعود الشحنات المعنية غير مخصومة.`,
     deleteError: (message: string) => `تعذر حذف الدفعة: ${message}`,
+
+    /* --- Correcting or removing a debt/invoice already recorded --- */
+    stmtColActions: "إجراءات",
+    editInvoiceAction: "تعديل الفاتورة",
+    deleteInvoiceAction: "حذف الفاتورة",
+    editInvoiceTitle: "تعديل فاتورة دين مسجلة",
+    /** Deductions already taken against this invoice survive a correction —
+     *  they are undone only when they can no longer be true. */
+    editInvoiceHint: "يبقى ما سُدد من هذه الفاتورة كما هو. يُلغى السداد فقط إذا نقص المبلغ عمّا سُدد فعلاً أو تغيّر اسم المورد.",
+    editInvoiceSave: "حفظ التعديل",
+    editInvoiceError: (message: string) => `تعذر تعديل الفاتورة: ${message}`,
+    deleteInvoiceConfirm: (id: string, amount: string) =>
+      `حذف فاتورة الدين ${id} بقيمة ${amount} دج نهائياً؟
+
+سيُلغى ما سُدد منها ويعود ذلك المبلغ رصيداً لدى المورد.`,
+    deleteInvoiceError: (message: string) => `تعذر حذف الفاتورة: ${message}`,
 
     /* --- The printed version of the statement (paper output) --- */
     printTitle: "كشف حساب المورد",
@@ -863,7 +883,7 @@ export const T = {
     clientNamePlaceholder: "مثال: شركة بوعمامة للبناء",
     driverName: "اسم السائق",
     tripDriverPlaceholder: "السائق المكلف بالرحلة",
-    originFactory: "الالمصنع المورّد للمادة",
+    originFactory: "المصنع المورّد للمادة",
     originFactoryPlaceholder: "مصنع الأسمنت",
     destination: "الوجهة والمسار",
     destinationPlaceholder: "موقع 1500 مسكن",

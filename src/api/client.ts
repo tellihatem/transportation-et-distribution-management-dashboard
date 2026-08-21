@@ -103,6 +103,12 @@ export async function updateTrip(id: string, trip: Partial<ClientTransportTripIn
   });
 }
 
+/** One trip by id — used to open the edit form from a statement, where the
+ *  loaded list may be filtered to a different date range. */
+export async function fetchTripById(id: string): Promise<ClientTransportTrip> {
+  return request<ClientTransportTrip>(`/trips/${id}`);
+}
+
 export async function deleteTrip(id: string): Promise<void> {
   return request(`/trips/${id}`, { method: 'DELETE' });
 }
@@ -146,6 +152,11 @@ export async function updateResale(id: string, resale: Partial<MaterialResaleTxI
     method: 'PUT',
     body: JSON.stringify(resale),
   });
+}
+
+/** One resale by id — see fetchTripById. */
+export async function fetchResaleById(id: string): Promise<MaterialResaleTx> {
+  return request<MaterialResaleTx>(`/resales/${id}`);
 }
 
 export async function deleteResale(id: string): Promise<void> {
@@ -504,6 +515,19 @@ export async function createSupplierInvoice(payload: {
 }): Promise<import('../types').SupplierInvoice> {
   return request<import('../types').SupplierInvoice>('/supplier-invoices', {
     method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Correct a supplier debt/invoice entered wrongly. */
+export async function updateSupplierInvoice(id: string, payload: {
+  date: string;
+  supplierName: string;
+  amount: number;
+  notes?: string;
+}): Promise<import('../types').SupplierInvoice> {
+  return request<import('../types').SupplierInvoice>(`/supplier-invoices/${id}`, {
+    method: 'PUT',
     body: JSON.stringify(payload),
   });
 }

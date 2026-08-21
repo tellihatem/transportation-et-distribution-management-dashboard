@@ -47,6 +47,8 @@ interface SupplierAccountsTabProps {
   }) => Promise<{ deducted: number; remainingAdvance: number; targetRemaining: number }>;
   onUpdatePayment: (id: string, payload: any) => Promise<any>;
   onDeletePayment: (id: string) => Promise<any>;
+  onUpdateInvoice: (id: string, payload: any) => Promise<any>;
+  onDeleteInvoice: (id: string) => Promise<any>;
   onRefresh: () => void;
 }
 
@@ -59,6 +61,8 @@ export function SupplierAccountsTab({
   onDeductAdvance,
   onUpdatePayment,
   onDeletePayment,
+  onUpdateInvoice,
+  onDeleteInvoice,
   onRefresh
 }: SupplierAccountsTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,6 +76,16 @@ export function SupplierAccountsTab({
   // Correcting a payment already recorded. editingId doubles as "the edit
   // dialog is open", and holds which receipt is being corrected.
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Correcting a debt/invoice already recorded, kept separate from the
+  // payment dialog so neither can be half-open over the other.
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+  const [editInvoiceForm, setEditInvoiceForm] = useState({
+    date: '',
+    supplierName: '',
+    amount: 0,
+    notes: '',
+  });
   const [editForm, setEditForm] = useState({
     date: '',
     supplierName: '',
@@ -297,6 +311,48 @@ export function SupplierAccountsTab({
       onRefresh();
     } catch (err: any) {
       alert(T.supplierAccounts.deleteError(err.message));
+    }
+  };
+
+  const openEditForInvoice = (item: SupplierStatement['itemized'][number], supplierName: string) => {
+    setEditInvoiceForm({
+      date: item.date,
+      supplierName,
+      amount: item.owed,
+      notes: item.description || '',
+    });
+    setEditingInvoiceId(item.id);
+  };
+
+  const handleEditInvoiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingInvoiceId || !editInvoiceForm.supplierName || editInvoiceForm.amount <= 0) return;
+    setSubmitting(true);
+    try {
+      await onUpdateInvoice(editingInvoiceId, {
+        date: editInvoiceForm.date,
+        supplierName: editInvoiceForm.supplierName,
+        amount: Number(editInvoiceForm.amount),
+        notes: editInvoiceForm.notes,
+      });
+      setEditingInvoiceId(null);
+      await openStatementForSupplier(editInvoiceForm.supplierName);
+      onRefresh();
+    } catch (err: any) {
+      alert(T.supplierAccounts.editInvoiceError(err.message));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteInvoice = async (item: SupplierStatement['itemized'][number], supplierName: string) => {
+    if (!confirm(T.supplierAccounts.deleteInvoiceConfirm(item.id, item.owed.toLocaleString()))) return;
+    try {
+      await onDeleteInvoice(item.id);
+      await openStatementForSupplier(supplierName);
+      onRefresh();
+    } catch (err: any) {
+      alert(T.supplierAccounts.deleteInvoiceError(err.message));
     }
   };
 
@@ -1011,6 +1067,106 @@ export function SupplierAccountsTab({
         </div>
       )}
 
+      {/* CORRECT A RECORDED DEBT/INVOICE
+          Above the statement (z-60) because it is opened from inside it. */}
+      {editingInvoiceId && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
+            <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
+                <ReceiptText className="w-5 h-5" />
+                {T.supplierAccounts.editInvoiceTitle}
+              </div>
+              <button
+                onClick={() => setEditingInvoiceId(null)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-700/50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditInvoiceSubmit} className="p-6 space-y-4">
+              <p className="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2">
+                {T.supplierAccounts.editInvoiceHint}
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldInvoiceNo}</label>
+                  <input
+                    type="text"
+                    value={editingInvoiceId}
+                    disabled
+                    className="w-full bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldDate}</label>
+                  <input
+                    type="date"
+                    value={editInvoiceForm.date}
+                    onChange={e => setEditInvoiceForm({ ...editInvoiceForm, date: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldSupplierName}</label>
+                <input
+                  type="text"
+                  value={editInvoiceForm.supplierName}
+                  onChange={e => setEditInvoiceForm({ ...editInvoiceForm, supplierName: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldInvoiceAmount}</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={editInvoiceForm.amount}
+                  onChange={e => setEditInvoiceForm({ ...editInvoiceForm, amount: Number(e.target.value) })}
+                  className="w-full bg-slate-900 border border-amber-700/60 rounded-lg px-3 py-2 text-base text-amber-300 font-bold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.supplierAccounts.fieldNotes}</label>
+                <textarea
+                  rows={2}
+                  value={editInvoiceForm.notes}
+                  onChange={e => setEditInvoiceForm({ ...editInvoiceForm, notes: e.target.value })}
+                  placeholder={T.supplierAccounts.invoiceNotesPlaceholder}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setEditingInvoiceId(null)}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium"
+                >
+                  {T.supplierAccounts.cancel}
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-amber-950/50"
+                >
+                  {submitting ? T.supplierAccounts.editSaving : T.supplierAccounts.editInvoiceSave}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* STATEMENT MODAL */}
       {isStatementModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
@@ -1080,6 +1236,7 @@ export function SupplierAccountsTab({
                             <th className="p-2.5">{T.supplierAccounts.stmtColOwed}</th>
                             <th className="p-2.5">{T.supplierAccounts.stmtColPaid}</th>
                             <th className="p-2.5">{T.supplierAccounts.stmtColRemaining}</th>
+                            <th className="p-2.5">{T.supplierAccounts.stmtColActions}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
@@ -1103,6 +1260,30 @@ export function SupplierAccountsTab({
                                   <span className="text-amber-400">{item.remaining.toLocaleString()} {T.common.currency}</span>
                                 ) : (
                                   <span className="text-emerald-400">0 {T.common.currency}</span>
+                                )}
+                              </td>
+                              <td className="p-2.5">
+                                {/* Shipment rows belong to the resale record and are
+                                    corrected there; only manual debts are editable here. */}
+                                {item.type === 'invoice' ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => openEditForInvoice(item, statementData.supplierName)}
+                                      title={T.supplierAccounts.editInvoiceAction}
+                                      className="p-1.5 rounded-lg bg-amber-950/40 text-amber-400 hover:bg-amber-900/60 border border-amber-900/60"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteInvoice(item, statementData.supplierName)}
+                                      title={T.supplierAccounts.deleteInvoiceAction}
+                                      className="p-1.5 rounded-lg bg-red-950/40 text-red-400 hover:bg-red-900/60 border border-red-900/60"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-600">—</span>
                                 )}
                               </td>
                             </tr>
