@@ -309,6 +309,24 @@ export async function createClientPayment(payload: {
   });
 }
 
+/**
+ * Correct a client receipt entered wrongly. The server re-spreads the
+ * corrected amount, so the per-trip figures follow the correction.
+ */
+export async function updateClientPayment(id: string, payload: {
+  date: string;
+  clientName: string;
+  amount: number;
+  paymentMethod?: string;
+  notes?: string;
+  allocationMode: 'auto' | 'none';
+}): Promise<import('../types').ClientPayment> {
+  return request<import('../types').ClientPayment>(`/client-payments/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function deleteClientPayment(id: string): Promise<void> {
   return request(`/client-payments/${id}`, { method: 'DELETE' });
 }
@@ -415,6 +433,25 @@ export async function createSupplierPayment(payload: {
 }): Promise<import('../types').SupplierPayment> {
   return request<import('../types').SupplierPayment>('/supplier-payments', {
     method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Correct a supplier payment entered wrongly. Any manual deductions drawn
+ * from it are undone, since they spent money the corrected figure may no
+ * longer contain.
+ */
+export async function updateSupplierPayment(id: string, payload: {
+  date: string;
+  supplierName: string;
+  amount: number;
+  paymentType?: string;
+  notes?: string;
+  allocationMode: 'auto' | 'none';
+}): Promise<import('../types').SupplierPayment> {
+  return request<import('../types').SupplierPayment>(`/supplier-payments/${id}`, {
+    method: 'PUT',
     body: JSON.stringify(payload),
   });
 }

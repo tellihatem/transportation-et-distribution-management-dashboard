@@ -9,6 +9,7 @@ import {
   fetchSupplierPayments,
   fetchSupplierSummaries,
   createSupplierPayment,
+  updateSupplierPayment,
   deleteSupplierPayment,
   createSupplierInvoice,
   deleteSupplierInvoice,
@@ -59,6 +60,20 @@ export function useSupplierPayments(filters?: TabFilters) {
     return created;
   }, [load]);
 
+  /** Correct a payment entered wrongly; undoes deductions drawn from it. */
+  const updatePayment = useCallback(async (id: string, payload: {
+    date: string;
+    supplierName: string;
+    amount: number;
+    paymentType?: string;
+    notes?: string;
+    allocationMode: 'auto' | 'none';
+  }) => {
+    const updated = await updateSupplierPayment(id, payload);
+    await load();
+    return updated;
+  }, [load]);
+
   const removePayment = useCallback(async (id: string) => {
     await deleteSupplierPayment(id);
     await load();
@@ -100,6 +115,7 @@ export function useSupplierPayments(filters?: TabFilters) {
     error,
     reload: load,
     recordPayment,
+    updatePayment,
     removePayment,
     addInvoice,
     removeInvoice,

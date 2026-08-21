@@ -19,7 +19,9 @@ import {
   Layers,
   Sparkles,
   ArrowDownRight,
-  ShieldCheck
+  ShieldCheck,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import type { ClientSummary, ClientStatement, TabFilters } from '../types';
 import { fetchClientStatement, fetchNextClientPaymentId } from '../api/client';
@@ -30,6 +32,8 @@ interface ClientAccountsTabProps {
   loading: boolean;
   filters: TabFilters;
   onRecordPayment: (payload: any) => Promise<any>;
+  onUpdatePayment: (id: string, payload: any) => Promise<any>;
+  onDeletePayment: (id: string) => Promise<any>;
   onRefreshTrips: () => void;
 }
 
@@ -38,6 +42,8 @@ export function ClientAccountsTab({
   loading,
   filters,
   onRecordPayment,
+  onUpdatePayment,
+  onDeletePayment,
   onRefreshTrips
 }: ClientAccountsTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -59,6 +65,18 @@ export function ClientAccountsTab({
 
   const [submitting, setSubmitting] = useState(false);
 
+  // Correcting a receipt already recorded. editingId doubles as "the edit
+  // dialog is open", and holds which receipt is being corrected.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    date: '',
+    clientName: '',
+    amount: 0,
+    paymentMethod: '',
+    notes: '',
+    allocationMode: 'auto' as 'auto' | 'none',
+  });
+
   // Open Payment Modal for a specific client
   const openPaymentForClient = async (clientName: string) => {
     try {
@@ -78,6 +96,57 @@ export function ClientAccountsTab({
   };
 
   // Open Statement Modal for a client
+  /** Open the correction dialog prefilled with the receipt as recorded. */
+  const openEditForPayment = (p: ClientStatement['payments'][number], clientName: string) => {
+    setEditForm({
+      date: p.date,
+      clientName,
+      amount: p.amount,
+      paymentMethod: p.paymentMethod || T.clientAccounts.methodCash,
+      notes: p.notes || '',
+      // A payment that was never applied is an advance; keep it one unless
+      // the owner deliberately switches to auto.
+      allocationMode: p.allocatedAmount > 0 ? 'auto' : 'none',
+    });
+    setEditingId(p.id);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingId || !editForm.clientName || editForm.amount <= 0) return;
+    setSubmitting(true);
+    try {
+      await onUpdatePayment(editingId, {
+        date: editForm.date,
+        clientName: editForm.clientName,
+        amount: Number(editForm.amount),
+        paymentMethod: editForm.paymentMethod,
+        notes: editForm.notes,
+        allocationMode: editForm.allocationMode,
+      });
+      setEditingId(null);
+      // The statement is open behind this dialog — refresh it so the
+      // corrected figures replace the old ones immediately.
+      await openStatementForClient(editForm.clientName);
+      onRefreshTrips();
+    } catch (err: any) {
+      alert(T.clientAccounts.editError(err.message));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeletePayment = async (p: ClientStatement['payments'][number], clientName: string) => {
+    if (!confirm(T.clientAccounts.deleteConfirm(p.id, p.amount.toLocaleString()))) return;
+    try {
+      await onDeletePayment(p.id);
+      await openStatementForClient(clientName);
+      onRefreshTrips();
+    } catch (err: any) {
+      alert(T.clientAccounts.deleteError(err.message));
+    }
+  };
+
   const openStatementForClient = async (clientName: string) => {
     setLoadingStatement(true);
     setIsStatementModalOpen(true);
@@ -456,6 +525,160 @@ export function ClientAccountsTab({
         </div>
       )}
 
+      {/* CORRECT A RECORDED RECEIPT
+          Sits above the statement (z-60) because it is opened from inside it. */}
+      {editingId && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
+            <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
+                <Pencil className="w-5 h-5" />
+                {T.clientAccounts.editModalTitle}
+              </div>
+              <button
+                onClick={() => setEditingId(null)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-700/50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              <p className="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2">
+                {T.clientAccounts.editHint}
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.clientAccounts.fieldReceiptNo}</label>
+                  <input
+                    type="text"
+                    value={editingId}
+                    disabled
+                    className="w-full bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.clientAccounts.fieldDate}</label>
+                  <input
+                    type="date"
+                    value={editForm.date}
+                    onChange={e => setEditForm({ ...editForm, date: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.clientAccounts.fieldClientName}</label>
+                <input
+                  type="text"
+                  value={editForm.clientName}
+                  onChange={e => setEditForm({ ...editForm, clientName: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.clientAccounts.fieldAmount}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editForm.amount}
+                    onChange={e => setEditForm({ ...editForm, amount: Number(e.target.value) })}
+                    className="w-full bg-slate-900 border border-amber-700/60 rounded-lg px-3 py-2 text-base text-amber-300 font-bold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">{T.clientAccounts.fieldPaymentMethod}</label>
+                  <select
+                    value={editForm.paymentMethod}
+                    onChange={e => setEditForm({ ...editForm, paymentMethod: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                  >
+                    <option value={T.clientAccounts.methodCash}>{T.clientAccounts.methodCash}</option>
+                    <option value={T.clientAccounts.methodCheque}>{T.clientAccounts.methodCheque}</option>
+                    <option value={T.clientAccounts.methodTransfer}>{T.clientAccounts.methodTransfer}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-2">{T.clientAccounts.allocationLabel}</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className={`p-3 border rounded-xl cursor-pointer flex flex-col gap-1 transition-all ${
+                    editForm.allocationMode === 'auto'
+                      ? 'bg-emerald-950/40 border-emerald-500 text-emerald-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <input
+                        type="radio"
+                        name="allocModeClientEdit"
+                        checked={editForm.allocationMode === 'auto'}
+                        onChange={() => setEditForm({ ...editForm, allocationMode: 'auto' })}
+                        className="accent-emerald-500"
+                      />
+                      {T.clientAccounts.allocationAuto}
+                    </div>
+                    <span className="text-[11px] opacity-80">{T.clientAccounts.allocationAutoHint}</span>
+                  </label>
+
+                  <label className={`p-3 border rounded-xl cursor-pointer flex flex-col gap-1 transition-all ${
+                    editForm.allocationMode === 'none'
+                      ? 'bg-blue-950/40 border-blue-500 text-blue-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <input
+                        type="radio"
+                        name="allocModeClientEdit"
+                        checked={editForm.allocationMode === 'none'}
+                        onChange={() => setEditForm({ ...editForm, allocationMode: 'none' })}
+                        className="accent-blue-500"
+                      />
+                      {T.clientAccounts.allocationNone}
+                    </div>
+                    <span className="text-[11px] opacity-80">{T.clientAccounts.allocationNoneHint}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{T.clientAccounts.fieldNotes}</label>
+                <textarea
+                  rows={2}
+                  value={editForm.notes}
+                  onChange={e => setEditForm({ ...editForm, notes: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setEditingId(null)}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium"
+                >
+                  {T.clientAccounts.cancel}
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-amber-950/50"
+                >
+                  {submitting ? T.clientAccounts.editSaving : T.clientAccounts.editSave}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* STATEMENT OF ACCOUNT MODAL */}
       {isStatementModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
@@ -574,12 +797,13 @@ export function ClientAccountsTab({
                             <th className="p-2.5">{T.clientAccounts.stmtPayColMethod}</th>
                             <th className="p-2.5">{T.clientAccounts.stmtPayColAmount}</th>
                             <th className="p-2.5">{T.clientAccounts.stmtPayColNotes}</th>
+                            <th className="p-2.5 text-center">{T.clientAccounts.stmtPayColActions}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
                           {statementData.payments.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="p-4 text-center text-slate-500">{T.clientAccounts.stmtNoPayments}</td>
+                              <td colSpan={6} className="p-4 text-center text-slate-500">{T.clientAccounts.stmtNoPayments}</td>
                             </tr>
                           ) : (
                             statementData.payments.map((p, idx) => (
@@ -589,6 +813,24 @@ export function ClientAccountsTab({
                                 <td className="p-2.5">{p.paymentMethod}</td>
                                 <td className="p-2.5 font-mono font-bold text-emerald-400">{p.amount.toLocaleString()} {T.common.currency}</td>
                                 <td className="p-2.5 text-slate-400">{p.notes || '-'}</td>
+                                <td className="p-2.5">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button
+                                      onClick={() => openEditForPayment(p, statementData.clientName)}
+                                      title={T.clientAccounts.editPaymentAction}
+                                      className="p-1.5 rounded bg-slate-700/70 hover:bg-slate-600 text-slate-200 border border-slate-600 transition-colors"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeletePayment(p, statementData.clientName)}
+                                      title={T.clientAccounts.deletePaymentAction}
+                                      className="p-1.5 rounded bg-rose-950/45 hover:bg-rose-900/40 text-rose-400 border border-rose-900/60 transition-colors"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
                               </tr>
                             ))
                           )}

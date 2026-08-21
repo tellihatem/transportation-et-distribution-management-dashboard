@@ -158,6 +158,8 @@ export interface ClientStatement {
     amount: number;
     paymentMethod: string;
     notes: string;
+    /** Portion already applied to trips/shipments (0 = pure advance). */
+    allocatedAmount: number;
   }>;
 }
 
@@ -223,6 +225,8 @@ export interface DriverStatement {
     amount: number;
     paymentType: string;
     notes: string;
+    /** Portion already applied to trips/shipments (0 = pure advance). */
+    allocatedAmount: number;
   }>;
 }
 
@@ -302,6 +306,8 @@ export interface SupplierStatement {
     amount: number;
     paymentType: string;
     notes: string;
+    /** Portion already applied to trips/shipments (0 = pure advance). */
+    allocatedAmount: number;
   }>;
 }
 

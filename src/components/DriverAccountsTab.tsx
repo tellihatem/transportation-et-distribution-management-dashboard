@@ -120,7 +120,9 @@ export function DriverAccountsTab({
       notes: p.notes || '',
       // Re-spreading is the norm; the operator can switch it back to an
       // advance if that is what the payment really was.
-      allocationMode: 'auto',
+      // A payment that was never applied is an advance; keep it one unless
+      // the owner deliberately switches to auto.
+      allocationMode: p.allocatedAmount > 0 ? 'auto' : 'none',
     });
     setEditingId(p.id);
   };

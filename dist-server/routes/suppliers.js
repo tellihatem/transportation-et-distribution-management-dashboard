@@ -299,7 +299,11 @@ exports.supplierPaymentsRouter.get('/statement/:supplierName', (0, error_handler
                 date: p.date,
                 amount: p.amount,
                 paymentType: p.payment_type ?? '',
-                notes: p.notes ?? ''
+                notes: p.notes ?? '',
+                // How much of this payment is currently applied to shipments/trips.
+                // The edit dialog reads it so correcting an unapplied advance does not
+                // silently turn it into a settlement.
+                allocatedAmount: database_1.default.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payment_allocations WHERE payment_id = ?').get(p.id).total
             }))
         }
     });
@@ -320,41 +324,93 @@ exports.supplierPaymentsRouter.post('/', (0, error_handler_1.asyncHandler)(async
     `).run(id, date, supplierName, amount, paymentType || '', notes || '');
         let remainingToAllocate = amount;
         if (allocationMode === 'auto') {
-            // FIFO across BOTH debt sources, oldest first: unpaid resales bought
-            // from this supplier and unpaid manual invoices.
-            const unpaidResales = database_1.default.prepare(`
-        SELECT id, 'resale' as target_type, date, ${RESALE_SUPPLIER_COST_SQL} as owed, supplier_paid as paid
-        FROM material_resales
-        WHERE origin_factory = ? AND COALESCE(supplier_paid, 0) < ${RESALE_SUPPLIER_COST_SQL}
-        ORDER BY date ASC
-      `).all(supplierName);
-            const unpaidInvoices = database_1.default.prepare(`
-        SELECT id, 'invoice' as target_type, date, amount as owed, paid
-        FROM supplier_invoices
-        WHERE supplier_name = ? AND COALESCE(paid, 0) < amount
-        ORDER BY date ASC
-      `).all(supplierName);
-            const combinedUnpaid = [...unpaidResales, ...unpaidInvoices].sort((a, b) => a.date.localeCompare(b.date));
-            for (const item of combinedUnpaid) {
-                if (remainingToAllocate <= 0)
-                    break;
-                const due = item.owed - (item.paid ?? 0);
-                if (due <= 0)
-                    continue;
-                const allocAmt = Math.min(due, remainingToAllocate);
-                database_1.default.prepare(`
-          INSERT INTO supplier_payment_allocations (payment_id, target_type, target_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, item.target_type, item.id, allocAmt);
-                syncTargetPaid(item.target_type, item.id);
-                remainingToAllocate -= allocAmt;
-            }
+            // Same routine the correction path uses, so the two cannot diverge.
+            remainingToAllocate = allocateFifo(id, supplierName, remainingToAllocate);
         }
         // allocationMode 'none': the payment stays unallocated — a prepayment.
     });
     executePaymentTx();
     const created = database_1.default.prepare('SELECT * FROM supplier_payments WHERE id = ?').get(id);
     res.status(201).json({ success: true, data: created });
+}));
+/**
+ * Settle a supplier's unpaid shipments and invoices, oldest first, writing
+ * allocation rows and refreshing each target's paid cache.
+ *
+ * Shared by POST and PUT so a corrected payment settles by exactly the same
+ * rule as the original. Returns what could not be placed, which stays on the
+ * supplier's account as advance credit.
+ */
+function allocateFifo(paymentId, supplierName, amount) {
+    const unpaidResales = database_1.default.prepare(`
+    SELECT id, 'resale' as target_type, date, ${RESALE_SUPPLIER_COST_SQL} as owed, supplier_paid as paid
+    FROM material_resales
+    WHERE origin_factory = ? AND COALESCE(supplier_paid, 0) < ${RESALE_SUPPLIER_COST_SQL}
+    ORDER BY date ASC
+  `).all(supplierName);
+    const unpaidInvoices = database_1.default.prepare(`
+    SELECT id, 'invoice' as target_type, date, amount as owed, paid
+    FROM supplier_invoices
+    WHERE supplier_name = ? AND COALESCE(paid, 0) < amount
+    ORDER BY date ASC
+  `).all(supplierName);
+    const combinedUnpaid = [...unpaidResales, ...unpaidInvoices].sort((a, b) => a.date.localeCompare(b.date));
+    let remaining = amount;
+    for (const item of combinedUnpaid) {
+        if (remaining <= 0)
+            break;
+        const due = item.owed - (item.paid ?? 0);
+        if (due <= 0)
+            continue;
+        const allocAmt = Math.min(due, remaining);
+        database_1.default.prepare(`
+      INSERT INTO supplier_payment_allocations (payment_id, target_type, target_id, amount)
+      VALUES (?, ?, ?, ?)
+    `).run(paymentId, item.target_type, item.id, allocAmt);
+        syncTargetPaid(item.target_type, item.id);
+        remaining -= allocAmt;
+    }
+    return remaining;
+}
+/**
+ * PUT /api/supplier-payments/:id — Correct a payment entered wrongly
+ *
+ * Note this also undoes any manual deductions that were drawn from this
+ * payment: those deductions spent money the corrected figure may no longer
+ * contain, so they cannot be left standing. The shipments involved return to
+ * owing and can be deducted for again from the corrected balance.
+ */
+exports.supplierPaymentsRouter.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
+    const paymentId = req.params.id;
+    const existing = database_1.default.prepare('SELECT * FROM supplier_payments WHERE id = ?').get(paymentId);
+    if (!existing)
+        throw (0, error_handler_1.createApiError)('Payment not found', 404, 'NOT_FOUND');
+    const { date, supplierName, amount, paymentType, notes, allocationMode } = req.body;
+    if (!date || !supplierName || !amount || amount <= 0) {
+        throw (0, error_handler_1.createApiError)('Missing required fields: date, supplierName, amount', 400, 'VALIDATION_ERROR');
+    }
+    const updateTx = database_1.default.transaction(() => {
+        const previous = database_1.default.prepare(`
+      SELECT target_type, target_id FROM supplier_payment_allocations WHERE payment_id = ?
+    `).all(paymentId);
+        database_1.default.prepare('DELETE FROM supplier_payment_allocations WHERE payment_id = ?').run(paymentId);
+        for (const alloc of previous) {
+            syncTargetPaid(alloc.target_type, alloc.target_id);
+        }
+        database_1.default.prepare(`
+      UPDATE supplier_payments
+      SET date = ?, supplier_name = ?, amount = ?, payment_type = ?, notes = ?,
+          updated_at = datetime('now'), synced_at = NULL
+      WHERE id = ?
+    `).run(date, supplierName, amount, paymentType || '', notes || '', paymentId);
+        // 'none' leaves it as advance credit the owner draws down by hand.
+        if (allocationMode === 'auto') {
+            allocateFifo(paymentId, supplierName, amount);
+        }
+    });
+    updateTx();
+    const updated = database_1.default.prepare('SELECT * FROM supplier_payments WHERE id = ?').get(paymentId);
+    res.json({ success: true, data: updated });
 }));
 /**
  * GET /api/supplier-payments/available/:supplierName — Advance still on

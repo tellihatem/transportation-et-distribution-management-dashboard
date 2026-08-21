@@ -238,7 +238,11 @@ router.get('/statement/:driverName', asyncHandler(async (req: Request, res: Resp
         date: p.date,
         amount: p.amount,
         paymentType: p.payment_type ?? 'Settlement',
-        notes: p.notes ?? ''
+        notes: p.notes ?? '',
+        // How much of this payment is currently applied to shipments/trips.
+        // The edit dialog reads it so correcting an unapplied advance does not
+        // silently turn it into a settlement.
+        allocatedAmount: (db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM driver_payment_allocations WHERE payment_id = ?').get(p.id) as any).total
       }))
     }
   });

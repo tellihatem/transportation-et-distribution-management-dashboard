@@ -126,9 +126,9 @@ export default function App() {
   const { trips: clientTrips, error: tripsError, addTrip, editTrip, removeTrip, reload: reloadTrips } = useTrips(filters);
   const { resales: resaleTxs, error: resalesError, addResale, editResale, removeResale, reload: reloadResales } = useResales(filters);
   const { expenses, error: expensesError, addExpense, editExpense, removeExpense } = useExpenses(filters);
-  const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, reload: reloadClientPayments } = useClientPayments(filters);
+  const { payments: clientPayments, summaries: clientSummaries, recordPayment: recordClientPayment, updatePayment: updateClientPaymentRecord, removePayment: removeClientPaymentRecord, reload: reloadClientPayments } = useClientPayments(filters);
   const { payments: driverPayments, summaries: driverSummaries, recordPayment: recordDriverPayment, updatePayment: updateDriverPaymentRecord, removePayment: removeDriverPaymentRecord, reload: reloadDriverPayments } = useDriverPayments(filters);
-  const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, addInvoice: addSupplierInvoice, deductAdvance: deductSupplierAdvance, reload: reloadSupplierPayments } = useSupplierPayments(filters);
+  const { summaries: supplierSummaries, recordPayment: recordSupplierPayment, updatePayment: updateSupplierPaymentRecord, removePayment: removeSupplierPaymentRecord, addInvoice: addSupplierInvoice, deductAdvance: deductSupplierAdvance, reload: reloadSupplierPayments } = useSupplierPayments(filters);
 
   // Which build is running and which database file it opened — shown in the
   // header badge and in the reset dialog.
@@ -1237,6 +1237,8 @@ export default function App() {
                   loading={false}
                   filters={filters}
                   onRecordPayment={recordClientPayment}
+                  onUpdatePayment={updateClientPaymentRecord}
+                  onDeletePayment={removeClientPaymentRecord}
                   onRefreshTrips={refreshAllData}
                 />
               </motion.div>
@@ -1275,6 +1277,8 @@ export default function App() {
                   loading={false}
                   filters={filters}
                   onRecordPayment={recordSupplierPayment}
+                  onUpdatePayment={updateSupplierPaymentRecord}
+                  onDeletePayment={removeSupplierPaymentRecord}
                   onRecordInvoice={addSupplierInvoice}
                   onDeductAdvance={deductSupplierAdvance}
                   onRefresh={refreshAllData}

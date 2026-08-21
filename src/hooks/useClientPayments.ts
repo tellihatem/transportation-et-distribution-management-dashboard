@@ -8,6 +8,7 @@ import {
   fetchClientPayments,
   fetchClientSummaries,
   createClientPayment,
+  updateClientPayment,
   deleteClientPayment
 } from '../api/client';
 
@@ -56,6 +57,20 @@ export function useClientPayments(filters?: TabFilters) {
     return created;
   }, [load]);
 
+  /** Correct a receipt entered with the wrong amount, date, client or note. */
+  const updatePayment = useCallback(async (id: string, payload: {
+    date: string;
+    clientName: string;
+    amount: number;
+    paymentMethod?: string;
+    notes?: string;
+    allocationMode: 'auto' | 'none';
+  }) => {
+    const updated = await updateClientPayment(id, payload);
+    await load();
+    return updated;
+  }, [load]);
+
   const removePayment = useCallback(async (id: string) => {
     await deleteClientPayment(id);
     await load();
@@ -68,6 +83,7 @@ export function useClientPayments(filters?: TabFilters) {
     error,
     reload: load,
     recordPayment,
+    updatePayment,
     removePayment
   };
 }
