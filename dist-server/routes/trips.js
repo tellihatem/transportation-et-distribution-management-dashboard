@@ -11,6 +11,7 @@ const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
+const ledgers_1 = require("../ledgers");
 const router = (0, express_1.Router)();
 /**
  * GET /api/trips — List all trips with optional search/date filters
@@ -116,6 +117,7 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     INSERT INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, quantity_unit, truck_cost, driver_cut, company_profit, driver_name)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, quantityUnit || 'طن', truckCost || 0, driverCut || 0, companyProfit || 0, driverName || '');
+    (0, ledgers_1.reconcileWork)({ tripType: 'transport', tripId: id, clientNames: [clientName], driverNames: [driverName] });
     const created = database_1.default.prepare('SELECT * FROM client_trips WHERE id = ?').get(id);
     // Queue async sync to Supabase
     (0, replicator_1.queueSync)('client_trips', id, 'upsert', created);
@@ -125,7 +127,7 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * PUT /api/trips/:id — Update existing trip
  */
 router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const existing = database_1.default.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
+    const existing = database_1.default.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Trip not found', 404, 'NOT_FOUND');
     const { date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, companyProfit, driverName } = req.body;
@@ -137,6 +139,14 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
       updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
   `).run(date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit || 'طن', truckCost, driverCut, companyProfit, driverName || '', req.params.id);
+    // Both the old and new parties are reconciled: a trip moved to another
+    // client hands its money back to the first one as credit.
+    (0, ledgers_1.reconcileWork)({
+        tripType: 'transport',
+        tripId: req.params.id,
+        clientNames: [clientName, existing.client_name],
+        driverNames: [driverName, existing.driver_name],
+    });
     const updated = database_1.default.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
     (0, replicator_1.queueSync)('client_trips', req.params.id, 'upsert', updated);
     res.json({ success: true, data: mapRowToTrip(updated) });
@@ -145,7 +155,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * DELETE /api/trips/:id — Delete trip
  */
 router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const existing = database_1.default.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
+    const existing = database_1.default.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Trip not found', 404, 'NOT_FOUND');
     // Allocation rows have no FK to this table — remove the ones pointing at
@@ -157,6 +167,13 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         database_1.default.prepare('DELETE FROM client_trips WHERE id = ?').run(req.params.id);
     });
     deleteTx();
+    // The money that was settling this trip is free again — let it settle
+    // whatever else this client and driver still have outstanding.
+    (0, ledgers_1.reconcileWork)({
+        tripType: 'transport',
+        clientNames: [existing.client_name],
+        driverNames: [existing.driver_name],
+    });
     (0, replicator_1.queueSync)('client_trips', req.params.id, 'delete', null);
     res.json({ success: true, message: 'Trip deleted' });
 }));

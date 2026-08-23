@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
+import { reconcileWork } from '../ledgers';
 
 const router = Router();
 
@@ -129,6 +130,8 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, quantityUnit || 'طن', truckCost || 0, driverCut || 0, companyProfit || 0, driverName || '');
 
+  reconcileWork({ tripType: 'transport', tripId: id, clientNames: [clientName], driverNames: [driverName] });
+
   const created = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(id);
 
   // Queue async sync to Supabase
@@ -141,7 +144,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
  * PUT /api/trips/:id — Update existing trip
  */
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id) as any;
   if (!existing) throw createApiError('Trip not found', 404, 'NOT_FOUND');
 
   const { date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, companyProfit, driverName } = req.body;
@@ -155,6 +158,15 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     WHERE id = ?
   `).run(date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit || 'طن', truckCost, driverCut, companyProfit, driverName || '', req.params.id);
 
+  // Both the old and new parties are reconciled: a trip moved to another
+  // client hands its money back to the first one as credit.
+  reconcileWork({
+    tripType: 'transport',
+    tripId: req.params.id,
+    clientNames: [clientName, existing.client_name],
+    driverNames: [driverName, existing.driver_name],
+  });
+
   const updated = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
   queueSync('client_trips', req.params.id, 'upsert', updated);
 
@@ -165,7 +177,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
  * DELETE /api/trips/:id — Delete trip
  */
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT id FROM client_trips WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id) as any;
   if (!existing) throw createApiError('Trip not found', 404, 'NOT_FOUND');
 
   // Allocation rows have no FK to this table — remove the ones pointing at
@@ -177,6 +189,15 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
     db.prepare('DELETE FROM client_trips WHERE id = ?').run(req.params.id);
   });
   deleteTx();
+
+  // The money that was settling this trip is free again — let it settle
+  // whatever else this client and driver still have outstanding.
+  reconcileWork({
+    tripType: 'transport',
+    clientNames: [existing.client_name],
+    driverNames: [existing.driver_name],
+  });
+
   queueSync('client_trips', req.params.id, 'delete', null);
 
   res.json({ success: true, message: 'Trip deleted' });

@@ -11,6 +11,7 @@ const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
+const ledgers_1 = require("../ledgers");
 const router = (0, express_1.Router)();
 /**
  * What a driver is owed for one resale.
@@ -24,23 +25,6 @@ function resaleDriverWage(row) {
     return Math.max(1, row.trip_count ?? 1) * row.driver_cost;
 }
 /** SQL equivalent of resaleDriverWage(), for queries that cannot use it. */
-const RESALE_DRIVER_WAGE_SQL = 'MAX(1, COALESCE(trip_count, 1)) * driver_cost';
-/**
- * Helper: Recalculate trip/resale driver_paid from allocations table
- */
-function syncTripDriverPaid(tripType, tripId) {
-    const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-    const sumRow = database_1.default.prepare(`
-    SELECT COALESCE(SUM(amount), 0) as total_allocated
-    FROM driver_payment_allocations
-    WHERE trip_type = ? AND trip_id = ?
-  `).get(tripType, tripId);
-    database_1.default.prepare(`
-    UPDATE ${table}
-    SET driver_paid = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(sumRow.total_allocated, tripId);
-}
 /**
  * GET /api/driver-payments — List all driver payments with allocations
  */
@@ -254,13 +238,13 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
           INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
           VALUES (?, ?, ?, ?)
         `).run(id, alloc.tripType, alloc.tripId, allocAmt);
-                syncTripDriverPaid(alloc.tripType, alloc.tripId);
+                (0, ledgers_1.syncTripDriverPaid)(alloc.tripType, alloc.tripId);
                 remainingToAllocate -= allocAmt;
             }
         }
         else if (allocationMode === 'auto') {
             // Same routine the correction path uses, so the two cannot diverge.
-            remainingToAllocate = allocateFifo(id, driverName, remainingToAllocate);
+            remainingToAllocate = (0, ledgers_1.allocateDriverPayment)(id, driverName, remainingToAllocate);
         }
     });
     executePaymentTx();
@@ -268,46 +252,6 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     (0, replicator_1.queueSync)('driver_payments', id, 'upsert', created);
     res.status(201).json({ success: true, data: created });
 }));
-/**
- * Spread an amount over a driver's unpaid trips and resales, oldest first,
- * writing allocation rows and refreshing each target's paid cache.
- *
- * Shared by POST and PUT so a corrected payment is allocated by exactly the
- * same rule as the original — an edit must never leave the ledger in a state
- * the original could not have produced. Returns what could not be placed,
- * which stays on the driver's account as an advance.
- */
-function allocateFifo(paymentId, driverName, amount) {
-    const trips = database_1.default.prepare(`
-    SELECT id, 'transport' as trip_type, date, driver_cut as total_wage, driver_paid
-    FROM client_trips
-    WHERE driver_name = ? AND driver_paid < driver_cut
-    ORDER BY date ASC
-  `).all(driverName);
-    const resales = database_1.default.prepare(`
-    SELECT id, 'resale' as trip_type, date, ${RESALE_DRIVER_WAGE_SQL} as total_wage, driver_paid
-    FROM material_resales
-    WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL}
-    ORDER BY date ASC
-  `).all(driverName);
-    const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
-    let remaining = amount;
-    for (const item of combinedUnpaid) {
-        if (remaining <= 0)
-            break;
-        const due = item.total_wage - (item.driver_paid ?? 0);
-        if (due <= 0)
-            continue;
-        const allocAmt = Math.min(due, remaining);
-        database_1.default.prepare(`
-      INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
-      VALUES (?, ?, ?, ?)
-    `).run(paymentId, item.trip_type, item.id, allocAmt);
-        syncTripDriverPaid(item.trip_type, item.id);
-        remaining -= allocAmt;
-    }
-    return remaining;
-}
 /**
  * PUT /api/driver-payments/:id — Correct a payment that was entered wrongly
  *
@@ -335,7 +279,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     `).all(paymentId);
         database_1.default.prepare('DELETE FROM driver_payment_allocations WHERE payment_id = ?').run(paymentId);
         for (const alloc of previous) {
-            syncTripDriverPaid(alloc.trip_type, alloc.trip_id);
+            (0, ledgers_1.syncTripDriverPaid)(alloc.trip_type, alloc.trip_id);
         }
         database_1.default.prepare(`
       UPDATE driver_payments
@@ -345,7 +289,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     `).run(date, driverName, amount, paymentType || 'Settlement', notes || '', paymentId);
         // 'none' leaves the money unallocated — an advance, same as on create.
         if (allocationMode === 'auto') {
-            allocateFifo(paymentId, driverName, amount);
+            (0, ledgers_1.allocateDriverPayment)(paymentId, driverName, amount);
         }
     });
     updateTx();
@@ -367,7 +311,7 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         database_1.default.prepare('DELETE FROM driver_payment_allocations WHERE payment_id = ?').run(paymentId);
         database_1.default.prepare('DELETE FROM driver_payments WHERE id = ?').run(paymentId);
         for (const alloc of allocations) {
-            syncTripDriverPaid(alloc.trip_type, alloc.trip_id);
+            (0, ledgers_1.syncTripDriverPaid)(alloc.trip_type, alloc.trip_id);
         }
     });
     deleteTx();

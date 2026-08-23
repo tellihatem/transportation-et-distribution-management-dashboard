@@ -11,6 +11,7 @@ const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
+const ledgers_1 = require("../ledgers");
 const resale_math_1 = require("../resale-math");
 const router = (0, express_1.Router)();
 /**
@@ -140,6 +141,7 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     INSERT INTO material_resales (id, date, end_client, destination, material_type, origin_factory, factory_purchase_price, product_unit_price, total_tonnage, quantity_unit, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, trip_count)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice || 0, productUnitPrice || 0, totalTonnage || 0, quantityUnit || 'طن', invoiceTotal, truckCost || 0, driverCost || 0, explicitProfit || 0, driverName || '', trips);
+    (0, ledgers_1.reconcileWork)({ tripType: 'resale', tripId: id, clientNames: [endClient], driverNames: [driverName] });
     const created = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(id);
     (0, replicator_1.queueSync)('material_resales', id, 'upsert', created);
     res.status(201).json({ success: true, data: mapRowToResale(created) });
@@ -148,7 +150,7 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * PUT /api/resales/:id — Update existing resale
  */
 router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const existing = database_1.default.prepare('SELECT id, origin_factory FROM material_resales WHERE id = ?').get(req.params.id);
+    const existing = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Resale not found', 404, 'NOT_FOUND');
     const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
@@ -173,6 +175,14 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
       updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
   `).run(date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice, productUnitPrice || 0, totalTonnage, quantityUnit || 'طن', invoiceTotal, truckCost, driverCost, explicitProfit, driverName || '', trips, req.params.id);
+    // Same reasoning as the supplier block above, for the client and driver
+    // sides: whoever the shipment left keeps their money as credit.
+    (0, ledgers_1.reconcileWork)({
+        tripType: 'resale',
+        tripId: req.params.id,
+        clientNames: [endClient, existing.end_client],
+        driverNames: [driverName, existing.driver_name],
+    });
     const updated = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
     (0, replicator_1.queueSync)('material_resales', req.params.id, 'upsert', updated);
     res.json({ success: true, data: mapRowToResale(updated) });
@@ -181,7 +191,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * DELETE /api/resales/:id — Delete resale
  */
 router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const existing = database_1.default.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
+    const existing = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Resale not found', 404, 'NOT_FOUND');
     // Allocation rows have no FK to this table (loose linkage, like the other
@@ -194,6 +204,12 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         database_1.default.prepare('DELETE FROM material_resales WHERE id = ?').run(req.params.id);
     });
     deleteTx();
+    // Money freed by the deletion settles whatever else is outstanding.
+    (0, ledgers_1.reconcileWork)({
+        tripType: 'resale',
+        clientNames: [existing.end_client],
+        driverNames: [existing.driver_name],
+    });
     (0, replicator_1.queueSync)('material_resales', req.params.id, 'delete', null);
     res.json({ success: true, message: 'Resale deleted' });
 }));

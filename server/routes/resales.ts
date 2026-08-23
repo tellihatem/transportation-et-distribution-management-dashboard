@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
+import { reconcileWork } from '../ledgers';
 import { calcResale, calcInvoiceTotal, resaleTripCount } from '../resale-math';
 
 const router = Router();
@@ -154,6 +155,8 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice || 0, productUnitPrice || 0, totalTonnage || 0, quantityUnit || 'طن', invoiceTotal, truckCost || 0, driverCost || 0, explicitProfit || 0, driverName || '', trips);
 
+  reconcileWork({ tripType: 'resale', tripId: id, clientNames: [endClient], driverNames: [driverName] });
+
   const created = db.prepare('SELECT * FROM material_resales WHERE id = ?').get(id);
   queueSync('material_resales', id, 'upsert', created);
 
@@ -164,7 +167,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
  * PUT /api/resales/:id — Update existing resale
  */
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT id, origin_factory FROM material_resales WHERE id = ?').get(req.params.id) as any;
+  const existing = db.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id) as any;
   if (!existing) throw createApiError('Resale not found', 404, 'NOT_FOUND');
 
   const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
@@ -193,6 +196,15 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     WHERE id = ?
   `).run(date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice, productUnitPrice || 0, totalTonnage, quantityUnit || 'طن', invoiceTotal, truckCost, driverCost, explicitProfit, driverName || '', trips, req.params.id);
 
+  // Same reasoning as the supplier block above, for the client and driver
+  // sides: whoever the shipment left keeps their money as credit.
+  reconcileWork({
+    tripType: 'resale',
+    tripId: req.params.id,
+    clientNames: [endClient, existing.end_client],
+    driverNames: [driverName, existing.driver_name],
+  });
+
   const updated = db.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
   queueSync('material_resales', req.params.id, 'upsert', updated);
 
@@ -203,7 +215,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
  * DELETE /api/resales/:id — Delete resale
  */
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const existing = db.prepare('SELECT id FROM material_resales WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id) as any;
   if (!existing) throw createApiError('Resale not found', 404, 'NOT_FOUND');
 
   // Allocation rows have no FK to this table (loose linkage, like the other
@@ -216,6 +228,14 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
     db.prepare('DELETE FROM material_resales WHERE id = ?').run(req.params.id);
   });
   deleteTx();
+
+  // Money freed by the deletion settles whatever else is outstanding.
+  reconcileWork({
+    tripType: 'resale',
+    clientNames: [existing.end_client],
+    driverNames: [existing.driver_name],
+  });
+
   queueSync('material_resales', req.params.id, 'delete', null);
 
   res.json({ success: true, message: 'Resale deleted' });
