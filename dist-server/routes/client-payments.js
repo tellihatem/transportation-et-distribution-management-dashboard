@@ -11,23 +11,8 @@ const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
+const ledgers_1 = require("../ledgers");
 const router = (0, express_1.Router)();
-/**
- * Helper: Recalculate trip/resale client_paid from allocations table
- */
-function syncTripClientPaid(tripType, tripId) {
-    const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-    const sumRow = database_1.default.prepare(`
-    SELECT COALESCE(SUM(amount), 0) as total_allocated
-    FROM client_payment_allocations
-    WHERE trip_type = ? AND trip_id = ?
-  `).get(tripType, tripId);
-    database_1.default.prepare(`
-    UPDATE ${table}
-    SET client_paid = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(sumRow.total_allocated, tripId);
-}
 /**
  * GET /api/client-payments — List all client payments with allocations
  */
@@ -246,13 +231,13 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
           INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
           VALUES (?, ?, ?, ?)
         `).run(id, alloc.tripType, alloc.tripId, allocAmt);
-                syncTripClientPaid(alloc.tripType, alloc.tripId);
+                (0, ledgers_1.syncTripClientPaid)(alloc.tripType, alloc.tripId);
                 remainingToAllocate -= allocAmt;
             }
         }
         else if (allocationMode === 'auto') {
             // Same routine the correction path uses, so the two cannot diverge.
-            remainingToAllocate = allocateFifo(id, clientName, remainingToAllocate);
+            remainingToAllocate = (0, ledgers_1.allocateClientPayment)(id, clientName, remainingToAllocate);
         }
     });
     executePaymentTx();
@@ -260,48 +245,6 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     (0, replicator_1.queueSync)('client_payments', id, 'upsert', created);
     res.status(201).json({ success: true, data: created });
 }));
-/**
- * DELETE /api/client-payments/:id — Delete client payment and rollback allocations
- */
-/**
- * Spread an amount over a client's unpaid trips and resales, oldest first,
- * writing allocation rows and refreshing each target's paid cache.
- *
- * Shared by POST and PUT so a corrected receipt is allocated by exactly the
- * same rule as the original. Returns what could not be placed, which stays
- * on the client's account as unallocated credit.
- */
-function allocateFifo(paymentId, clientName, amount) {
-    const trips = database_1.default.prepare(`
-    SELECT id, 'transport' as trip_type, date, (truck_cost + driver_cut + company_profit) as total_fee, client_paid
-    FROM client_trips
-    WHERE client_name = ? AND client_paid < (truck_cost + driver_cut + company_profit)
-    ORDER BY date ASC
-  `).all(clientName);
-    const resales = database_1.default.prepare(`
-    SELECT id, 'resale' as trip_type, date, client_selling_price as total_fee, client_paid
-    FROM material_resales
-    WHERE end_client = ? AND client_paid < client_selling_price
-    ORDER BY date ASC
-  `).all(clientName);
-    const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
-    let remaining = amount;
-    for (const item of combinedUnpaid) {
-        if (remaining <= 0)
-            break;
-        const due = item.total_fee - (item.client_paid ?? 0);
-        if (due <= 0)
-            continue;
-        const allocAmt = Math.min(due, remaining);
-        database_1.default.prepare(`
-      INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
-      VALUES (?, ?, ?, ?)
-    `).run(paymentId, item.trip_type, item.id, allocAmt);
-        syncTripClientPaid(item.trip_type, item.id);
-        remaining -= allocAmt;
-    }
-    return remaining;
-}
 /**
  * PUT /api/client-payments/:id — Correct a receipt entered wrongly
  *
@@ -325,7 +268,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     `).all(paymentId);
         database_1.default.prepare('DELETE FROM client_payment_allocations WHERE payment_id = ?').run(paymentId);
         for (const alloc of previous) {
-            syncTripClientPaid(alloc.trip_type, alloc.trip_id);
+            (0, ledgers_1.syncTripClientPaid)(alloc.trip_type, alloc.trip_id);
         }
         database_1.default.prepare(`
       UPDATE client_payments
@@ -335,13 +278,16 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     `).run(date, clientName, amount, paymentMethod || 'Cash', notes || '', paymentId);
         // 'none' leaves the money unallocated — a deposit, same as on create.
         if (allocationMode === 'auto') {
-            allocateFifo(paymentId, clientName, amount);
+            (0, ledgers_1.allocateClientPayment)(paymentId, clientName, amount);
         }
     });
     updateTx();
     const updated = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
     res.json({ success: true, data: updated });
 }));
+/**
+ * DELETE /api/client-payments/:id — Delete client payment and rollback allocations
+ */
 router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const paymentId = req.params.id;
     const existing = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
@@ -358,7 +304,7 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         database_1.default.prepare('DELETE FROM client_payments WHERE id = ?').run(paymentId);
         // Sync affected trips
         for (const alloc of allocations) {
-            syncTripClientPaid(alloc.trip_type, alloc.trip_id);
+            (0, ledgers_1.syncTripClientPaid)(alloc.trip_type, alloc.trip_id);
         }
     });
     deleteTx();

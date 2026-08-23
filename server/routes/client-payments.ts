@@ -7,26 +7,9 @@ import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
+import { syncTripClientPaid, allocateClientPayment } from '../ledgers';
 
 const router = Router();
-
-/**
- * Helper: Recalculate trip/resale client_paid from allocations table
- */
-function syncTripClientPaid(tripType: 'transport' | 'resale', tripId: string) {
-  const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-  const sumRow = db.prepare(`
-    SELECT COALESCE(SUM(amount), 0) as total_allocated
-    FROM client_payment_allocations
-    WHERE trip_type = ? AND trip_id = ?
-  `).get(tripType, tripId) as { total_allocated: number };
-
-  db.prepare(`
-    UPDATE ${table}
-    SET client_paid = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(sumRow.total_allocated, tripId);
-}
 
 /**
  * GET /api/client-payments — List all client payments with allocations
@@ -282,7 +265,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
       }
     } else if (allocationMode === 'auto') {
       // Same routine the correction path uses, so the two cannot diverge.
-      remainingToAllocate = allocateFifo(id, clientName, remainingToAllocate);
+      remainingToAllocate = allocateClientPayment(id, clientName, remainingToAllocate);
     }
   });
 
@@ -293,55 +276,6 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 
   res.status(201).json({ success: true, data: created });
 }));
-
-/**
- * DELETE /api/client-payments/:id — Delete client payment and rollback allocations
- */
-/**
- * Spread an amount over a client's unpaid trips and resales, oldest first,
- * writing allocation rows and refreshing each target's paid cache.
- *
- * Shared by POST and PUT so a corrected receipt is allocated by exactly the
- * same rule as the original. Returns what could not be placed, which stays
- * on the client's account as unallocated credit.
- */
-function allocateFifo(paymentId: string, clientName: string, amount: number): number {
-  const trips = db.prepare(`
-    SELECT id, 'transport' as trip_type, date, (truck_cost + driver_cut + company_profit) as total_fee, client_paid
-    FROM client_trips
-    WHERE client_name = ? AND client_paid < (truck_cost + driver_cut + company_profit)
-    ORDER BY date ASC
-  `).all(clientName) as any[];
-
-  const resales = db.prepare(`
-    SELECT id, 'resale' as trip_type, date, client_selling_price as total_fee, client_paid
-    FROM material_resales
-    WHERE end_client = ? AND client_paid < client_selling_price
-    ORDER BY date ASC
-  `).all(clientName) as any[];
-
-  const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
-
-  let remaining = amount;
-  for (const item of combinedUnpaid) {
-    if (remaining <= 0) break;
-
-    const due = item.total_fee - (item.client_paid ?? 0);
-    if (due <= 0) continue;
-
-    const allocAmt = Math.min(due, remaining);
-
-    db.prepare(`
-      INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
-      VALUES (?, ?, ?, ?)
-    `).run(paymentId, item.trip_type, item.id, allocAmt);
-
-    syncTripClientPaid(item.trip_type, item.id);
-    remaining -= allocAmt;
-  }
-
-  return remaining;
-}
 
 /**
  * PUT /api/client-payments/:id — Correct a receipt entered wrongly
@@ -382,7 +316,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 
     // 'none' leaves the money unallocated — a deposit, same as on create.
     if (allocationMode === 'auto') {
-      allocateFifo(paymentId, clientName, amount);
+      allocateClientPayment(paymentId, clientName, amount);
     }
   });
 
@@ -392,6 +326,9 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   res.json({ success: true, data: updated });
 }));
 
+/**
+ * DELETE /api/client-payments/:id — Delete client payment and rollback allocations
+ */
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   const paymentId = req.params.id;
 

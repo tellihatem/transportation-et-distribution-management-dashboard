@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
+import { syncTripDriverPaid, allocateDriverPayment, RESALE_DRIVER_WAGE_SQL } from '../ledgers';
 
 const router = Router();
 
@@ -23,25 +24,6 @@ function resaleDriverWage(row: { driver_cost: number; trip_count?: number | null
 }
 
 /** SQL equivalent of resaleDriverWage(), for queries that cannot use it. */
-const RESALE_DRIVER_WAGE_SQL = 'MAX(1, COALESCE(trip_count, 1)) * driver_cost';
-
-/**
- * Helper: Recalculate trip/resale driver_paid from allocations table
- */
-function syncTripDriverPaid(tripType: 'transport' | 'resale', tripId: string) {
-  const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-  const sumRow = db.prepare(`
-    SELECT COALESCE(SUM(amount), 0) as total_allocated
-    FROM driver_payment_allocations
-    WHERE trip_type = ? AND trip_id = ?
-  `).get(tripType, tripId) as { total_allocated: number };
-
-  db.prepare(`
-    UPDATE ${table}
-    SET driver_paid = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(sumRow.total_allocated, tripId);
-}
 
 /**
  * GET /api/driver-payments — List all driver payments with allocations
@@ -292,7 +274,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
       }
     } else if (allocationMode === 'auto') {
       // Same routine the correction path uses, so the two cannot diverge.
-      remainingToAllocate = allocateFifo(id, driverName, remainingToAllocate);
+      remainingToAllocate = allocateDriverPayment(id, driverName, remainingToAllocate);
     }
   });
 
@@ -303,53 +285,6 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 
   res.status(201).json({ success: true, data: created });
 }));
-
-/**
- * Spread an amount over a driver's unpaid trips and resales, oldest first,
- * writing allocation rows and refreshing each target's paid cache.
- *
- * Shared by POST and PUT so a corrected payment is allocated by exactly the
- * same rule as the original — an edit must never leave the ledger in a state
- * the original could not have produced. Returns what could not be placed,
- * which stays on the driver's account as an advance.
- */
-function allocateFifo(paymentId: string, driverName: string, amount: number): number {
-  const trips = db.prepare(`
-    SELECT id, 'transport' as trip_type, date, driver_cut as total_wage, driver_paid
-    FROM client_trips
-    WHERE driver_name = ? AND driver_paid < driver_cut
-    ORDER BY date ASC
-  `).all(driverName) as any[];
-
-  const resales = db.prepare(`
-    SELECT id, 'resale' as trip_type, date, ${RESALE_DRIVER_WAGE_SQL} as total_wage, driver_paid
-    FROM material_resales
-    WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL}
-    ORDER BY date ASC
-  `).all(driverName) as any[];
-
-  const combinedUnpaid = [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
-
-  let remaining = amount;
-  for (const item of combinedUnpaid) {
-    if (remaining <= 0) break;
-
-    const due = item.total_wage - (item.driver_paid ?? 0);
-    if (due <= 0) continue;
-
-    const allocAmt = Math.min(due, remaining);
-
-    db.prepare(`
-      INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
-      VALUES (?, ?, ?, ?)
-    `).run(paymentId, item.trip_type, item.id, allocAmt);
-
-    syncTripDriverPaid(item.trip_type, item.id);
-    remaining -= allocAmt;
-  }
-
-  return remaining;
-}
 
 /**
  * PUT /api/driver-payments/:id — Correct a payment that was entered wrongly
@@ -394,7 +329,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 
     // 'none' leaves the money unallocated — an advance, same as on create.
     if (allocationMode === 'auto') {
-      allocateFifo(paymentId, driverName, amount);
+      allocateDriverPayment(paymentId, driverName, amount);
     }
   });
 
