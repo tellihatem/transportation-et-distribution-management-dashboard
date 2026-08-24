@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Truck,
   Layers,
@@ -29,6 +29,8 @@ import {
   CheckCircle2,
   Lock,
   Compass,
+  Sun,
+  Moon,
   MapPin,
   Tag,
   Download,
@@ -65,6 +67,7 @@ import { ClientAccountsTab } from "./components/ClientAccountsTab";
 import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { SupplierAccountsTab } from "./components/SupplierAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
+import { chartTheme } from "./chart-theme";
 import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId, fetchTripById, fetchResaleById } from "./api/client";
 import logoUrl from "../assets/logo.png";
 import { T } from "./strings";
@@ -146,6 +149,24 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"overview" | "transport" | "resale" | "clients" | "drivers" | "suppliers" | "expenses">("overview");
 
   // --- Modals State ---
+  // Light / dark. index.html applies the stored choice before React mounts,
+  // so the initial value is read back off the element instead of defaulting
+  // to dark and flashing.
+  const [theme, setTheme] = useState<"dark" | "light">(
+    () => (typeof document !== "undefined" && document.documentElement.dataset.theme === "light" ? "light" : "dark")
+  );
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {
+      // Private/blocked storage: the choice simply does not outlive the session.
+    }
+  }, [theme]);
+
+  const charts = chartTheme(theme);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"add" | "edit">("add");
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
@@ -662,7 +683,7 @@ export default function App() {
   const PIE_COLORS = ["#2563eb", "#3b82f6", "#22c55e", "#ef4444", "#eab308"];
 
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-100 font-sans antialiased selection:bg-blue-600 selection:text-white" dir="rtl">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-blue-600 selection:text-white" dir="rtl">
 
       {/* CSS stylesheet injection to handle Print receipts precisely on browser */}
       <style>{`
@@ -932,8 +953,19 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <div className="hidden md:flex flex-col text-left px-3 py-1 bg-slate-800 border border-slate-700/80 rounded-lg text-xs leading-tight">
                   <span className="text-slate-400 font-sans text-right">{T.brand.managerLabel}</span>
-                  <span className="text-white font-mono font-bold">{T.brand.managerName}</span>
+                  <span className="text-slate-100 font-mono font-bold">{T.brand.managerName}</span>
                 </div>
+
+                <button
+                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                  title={theme === "dark" ? T.header.themeToLight : T.header.themeToDark}
+                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg transition"
+                >
+                  {theme === "dark"
+                    ? <Sun className="h-3.5 w-3.5 text-amber-400" />
+                    : <Moon className="h-3.5 w-3.5 text-blue-400" />}
+                  <span className="hidden lg:inline">{theme === "dark" ? T.header.themeToLight : T.header.themeToDark}</span>
+                </button>
 
                 <button
                   onClick={handleExportBackup}
@@ -994,7 +1026,7 @@ export default function App() {
                   <span className="font-bold text-slate-300">{T.master.periodBadge}</span>
                 </div>
 
-                <h2 className="text-xl sm:text-2xl font-extrabold text-white font-display">
+                <h2 className="text-xl sm:text-2xl font-extrabold text-slate-100 font-display">
                   {T.master.title}
                 </h2>
 
@@ -1046,7 +1078,7 @@ export default function App() {
               </div>
 
               {/* High impact visualization counter */}
-              <div className="lg:col-span-4 bg-[#1e293b]/50 border border-slate-800 rounded-2xl p-5 text-center flex flex-col justify-center items-center">
+              <div className="lg:col-span-4 bg-slate-800/50 border border-slate-800 rounded-2xl p-5 text-center flex flex-col justify-center items-center">
                 <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">{T.master.periodProfitTitle}</p>
 
                 <div className="mt-2 flex items-baseline gap-2">
@@ -1234,6 +1266,7 @@ export default function App() {
                   clientSummaries={clientSummaries}
                   driverSummaries={driverSummaries}
                   onNavigateTab={tab => setActiveTab(tab)}
+                  charts={charts}
                 />
               </motion.div>
             )}
@@ -1372,7 +1405,7 @@ export default function App() {
                   {/* Cost Split stacked bar chart */}
                   <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">{T.transport.chartTitle}</h4>
+                      <h4 className="text-sm font-bold text-slate-100 mb-1">{T.transport.chartTitle}</h4>
                       <p className="text-[10px] text-slate-400 mb-4">{T.transport.chartSubtitle}</p>
                     </div>
 
@@ -1382,10 +1415,10 @@ export default function App() {
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={tab1ChartData} layout="vertical" margin={{ left: -10, right: 10, top: 5, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#1e293b" />
-                            <XAxis type="number" stroke="#64748b" fontSize={9} />
-                            <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={9} width={45} />
-                            <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155" }} />
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={charts.grid} />
+                            <XAxis type="number" stroke={charts.axis} fontSize={9} />
+                            <YAxis type="category" dataKey="name" stroke={charts.axis} fontSize={9} width={45} />
+                            <Tooltip contentStyle={{ background: charts.tooltipBg, border: `1px solid ${charts.tooltipBorder}`, color: charts.tooltipText }} />
                             <Bar dataKey={T.charts.truckCost} stackId="a" fill="#3b82f6" />
                             <Bar dataKey={T.charts.driverDue} stackId="a" fill="#10b981" />
                             <Bar dataKey={T.charts.companyMargin} stackId="a" fill="#06b6d4" />
@@ -1414,7 +1447,7 @@ export default function App() {
                   <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-bold text-white">{T.transport.tableTitle}</h4>
+                        <h4 className="text-sm font-bold text-slate-100">{T.transport.tableTitle}</h4>
                         <button
                           onClick={() => handleOpenAdd("transport")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
@@ -1595,7 +1628,7 @@ export default function App() {
                   {/* Sourcing Cost vs Final selling Combo */}
                   <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">{T.resale.chartTitle}</h4>
+                      <h4 className="text-sm font-bold text-slate-100 mb-1">{T.resale.chartTitle}</h4>
                       <p className="text-[10px] text-slate-400 mb-4">{T.resale.chartSubtitle}</p>
                     </div>
 
@@ -1605,10 +1638,10 @@ export default function App() {
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart data={tab2ChartData} margin={{ left: -10, right: 10, top: 10, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-                            <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
-                            <YAxis stroke="#64748b" fontSize={9} />
-                            <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155" }} />
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={charts.grid} />
+                            <XAxis dataKey="name" stroke={charts.axis} fontSize={9} />
+                            <YAxis stroke={charts.axis} fontSize={9} />
+                            <Tooltip contentStyle={{ background: charts.tooltipBg, border: `1px solid ${charts.tooltipBorder}`, color: charts.tooltipText }} />
                             <Bar dataKey={T.charts.materialPurchaseCost} fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
                             <Bar dataKey={T.charts.finalSellingPrice} fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
                             <Line type="monotone" dataKey={T.charts.actualTotalProfit} stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
@@ -1628,7 +1661,7 @@ export default function App() {
                   <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-bold text-white">{T.resale.tableTitle}</h4>
+                        <h4 className="text-sm font-bold text-slate-100">{T.resale.tableTitle}</h4>
                         <button
                           onClick={() => handleOpenAdd("resale")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
@@ -1776,7 +1809,7 @@ export default function App() {
                   {/* Expense Breakdown Categories */}
                   <div className="order-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-white mb-1">{T.expenses.chartTitle}</h4>
+                      <h4 className="text-sm font-bold text-slate-100 mb-1">{T.expenses.chartTitle}</h4>
                       <p className="text-[10px] text-slate-400 mb-4">{T.expenses.chartSubtitle}</p>
                     </div>
 
@@ -1799,7 +1832,7 @@ export default function App() {
                                 <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                               ))}
                             </Pie>
-                            <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155" }} />
+                            <Tooltip contentStyle={{ background: charts.tooltipBg, border: `1px solid ${charts.tooltipBorder}`, color: charts.tooltipText }} />
                           </PieChart>
                         </ResponsiveContainer>
                       )}
@@ -1822,7 +1855,7 @@ export default function App() {
                   <div className="order-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between min-h-[26rem]">
                     <div>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-bold text-white">{T.expenses.tableTitle}</h4>
+                        <h4 className="text-sm font-bold text-slate-100">{T.expenses.tableTitle}</h4>
                         <button
                           onClick={() => handleOpenAdd("expenses")}
                           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 transition font-bold"
@@ -1906,11 +1939,11 @@ export default function App() {
 
       {/* RENDER MODAL: WIPE THE DATABASE (irreversible — typed confirmation) */}
       {isResetOpen && (
-        <div className="no-print fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-rose-900/70 max-w-md w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative dir-rtl">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-600 to-red-500"></div>
 
-            <h3 className="text-base font-extrabold text-white flex items-center gap-2 mb-3">
+            <h3 className="text-base font-extrabold text-slate-100 flex items-center gap-2 mb-3">
               <Trash2 className="h-4.5 w-4.5 text-rose-500" />
               {T.reset.title}
             </h3>
@@ -1938,7 +1971,7 @@ export default function App() {
               autoFocus
               value={resetTyped}
               onChange={e => setResetTyped(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 p-2 rounded-lg text-white font-bold mb-5"
+              className="w-full bg-slate-950 border border-slate-700 p-2 rounded-lg text-slate-100 font-bold mb-5"
             />
 
             <div className="flex justify-end gap-2.5">
@@ -1966,7 +1999,7 @@ export default function App() {
       {/* RENDER MODAL: FOR ADD/EDIT WORKFLOW */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="no-print fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -1976,7 +2009,7 @@ export default function App() {
               <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
 
               <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-5">
-                <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                <h3 className="text-base font-extrabold text-slate-100 flex items-center gap-2">
                   <Truck className="h-4.5 w-4.5 text-blue-500" />
                   <span>
                     {modalType === "add" ? T.form.titleAdd : T.form.titleEdit}
@@ -1987,7 +2020,7 @@ export default function App() {
                 </h3>
                 <button
                   onClick={() => setIsModalOpen(false)}
-                  className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white"
+                  className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -2013,7 +2046,7 @@ export default function App() {
                           disabled={modalType === "edit"}
                           value={tripForm.id}
                           onChange={e => setTripForm(p => ({ ...p, id: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2023,7 +2056,7 @@ export default function App() {
                           required
                           value={tripForm.date}
                           onChange={e => setTripForm(p => ({ ...p, date: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                     </div>
@@ -2037,7 +2070,7 @@ export default function App() {
                           placeholder={T.form.clientNamePlaceholder}
                           value={tripForm.clientName}
                           onChange={e => setTripForm(p => ({ ...p, clientName: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2047,7 +2080,7 @@ export default function App() {
                           placeholder={T.form.tripDriverPlaceholder}
                           value={tripForm.driverName}
                           onChange={e => setTripForm(p => ({ ...p, driverName: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                     </div>
@@ -2061,7 +2094,7 @@ export default function App() {
                           placeholder={T.form.originFactoryPlaceholder}
                           value={tripForm.originFactory}
                           onChange={e => setTripForm(p => ({ ...p, originFactory: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2072,7 +2105,7 @@ export default function App() {
                           placeholder={T.form.destinationPlaceholder}
                           value={tripForm.destination}
                           onChange={e => setTripForm(p => ({ ...p, destination: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                     </div>
@@ -2086,7 +2119,7 @@ export default function App() {
                           placeholder={T.form.materialPlaceholder}
                           value={tripForm.materialType}
                           onChange={e => setTripForm(p => ({ ...p, materialType: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2098,7 +2131,7 @@ export default function App() {
                             required
                             value={tripForm.totalTonnage}
                             onChange={e => setTripForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
-                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                           />
                           <input
                             type="text"
@@ -2107,7 +2140,7 @@ export default function App() {
                             placeholder={T.form.unitPlaceholder}
                             value={tripForm.quantityUnit}
                             onChange={e => setTripForm(p => ({ ...p, quantityUnit: e.target.value }))}
-                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                           />
                         </div>
                       </div>
@@ -2124,7 +2157,7 @@ export default function App() {
                             required
                             value={tripForm.truckCost}
                             onChange={e => setTripForm(p => ({ ...p, truckCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
                           />
                         </div>
                         <div>
@@ -2134,7 +2167,7 @@ export default function App() {
                             required
                             value={tripForm.driverCut}
                             onChange={e => setTripForm(p => ({ ...p, driverCut: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
                           />
                         </div>
                         <div>
@@ -2144,7 +2177,7 @@ export default function App() {
                             required
                             value={tripForm.companyProfit}
                             onChange={e => setTripForm(p => ({ ...p, companyProfit: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
                           />
                         </div>
                       </div>
@@ -2169,7 +2202,7 @@ export default function App() {
                           disabled={modalType === "edit"}
                           value={resaleForm.id}
                           onChange={e => setResaleForm(p => ({ ...p, id: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2179,7 +2212,7 @@ export default function App() {
                           required
                           value={resaleForm.date}
                           onChange={e => setResaleForm(p => ({ ...p, date: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                     </div>
@@ -2192,7 +2225,7 @@ export default function App() {
                         placeholder={T.form.endClientPlaceholder}
                         value={resaleForm.endClient}
                         onChange={e => setResaleForm(p => ({ ...p, endClient: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                       />
                     </div>
 
@@ -2205,7 +2238,7 @@ export default function App() {
                           placeholder={T.form.resaleDestinationPlaceholder}
                           value={resaleForm.destination}
                           onChange={e => setResaleForm(p => ({ ...p, destination: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2215,7 +2248,7 @@ export default function App() {
                           placeholder={T.form.resaleDriverPlaceholder}
                           value={resaleForm.driverName}
                           onChange={e => setResaleForm(p => ({ ...p, driverName: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                     </div>
@@ -2229,7 +2262,7 @@ export default function App() {
                           placeholder={T.form.materialPlaceholder}
                           value={resaleForm.materialType}
                           onChange={e => setResaleForm(p => ({ ...p, materialType: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2240,7 +2273,7 @@ export default function App() {
                           placeholder={T.form.originFactoryPlaceholder}
                           value={resaleForm.originFactory}
                           onChange={e => setResaleForm(p => ({ ...p, originFactory: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                     </div>
@@ -2253,7 +2286,7 @@ export default function App() {
                           required
                           value={resaleForm.factoryPurchasePrice}
                           onChange={e => setResaleForm(p => ({ ...p, factoryPurchasePrice: parseInt(e.target.value) || 0 }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2264,7 +2297,7 @@ export default function App() {
                             required
                             value={resaleForm.totalTonnage}
                             onChange={e => setResaleForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
-                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                           />
                           <input
                             type="text"
@@ -2273,7 +2306,7 @@ export default function App() {
                             placeholder={T.form.unitPlaceholder}
                             value={resaleForm.quantityUnit}
                             onChange={e => setResaleForm(p => ({ ...p, quantityUnit: e.target.value }))}
-                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                           />
                         </div>
                       </div>
@@ -2297,7 +2330,7 @@ export default function App() {
                             value={resaleForm.productUnitPrice ?? ""}
                             placeholder={T.form.unitSellingPricePlaceholder}
                             onChange={e => setResaleForm(p => ({ ...p, productUnitPrice: parseFloat(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
                           />
                         </div>
                         <div className="flex flex-col justify-end">
@@ -2332,7 +2365,7 @@ export default function App() {
                             required
                             value={resaleForm.truckCost}
                             onChange={e => setResaleForm(p => ({ ...p, truckCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
                           />
                         </div>
                         <div>
@@ -2342,7 +2375,7 @@ export default function App() {
                             required
                             value={resaleForm.driverCost}
                             onChange={e => setResaleForm(p => ({ ...p, driverCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
                           />
                         </div>
                         <div>
@@ -2352,7 +2385,7 @@ export default function App() {
                             required
                             value={resaleForm.explicitProfit}
                             onChange={e => setResaleForm(p => ({ ...p, explicitProfit: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
                           />
                         </div>
                       </div>
@@ -2367,7 +2400,7 @@ export default function App() {
                             required
                             value={resaleForm.tripCount ?? 1}
                             onChange={e => setResaleForm(p => ({ ...p, tripCount: Math.max(1, parseInt(e.target.value) || 1) }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-white"
+                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
                           />
                         </div>
                         <div className="flex justify-between text-[10px] text-slate-400 pb-1">
@@ -2422,7 +2455,7 @@ export default function App() {
                           disabled={modalType === "edit"}
                           value={expenseForm.id}
                           onChange={e => setExpenseForm(p => ({ ...p, id: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                       <div>
@@ -2432,7 +2465,7 @@ export default function App() {
                           required
                           value={expenseForm.date}
                           onChange={e => setExpenseForm(p => ({ ...p, date: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
                     </div>
@@ -2442,7 +2475,7 @@ export default function App() {
                       <select
                         value={expenseForm.category}
                         onChange={e => setExpenseForm(p => ({ ...p, category: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                       >
                         {EXPENSE_CATEGORIES.map(cat => (
                           <option key={cat.value} value={cat.value}>{cat.label}</option>
@@ -2458,7 +2491,7 @@ export default function App() {
                         placeholder={T.form.truckPlatePlaceholder}
                         value={expenseForm.truckPlate}
                         onChange={e => setExpenseForm(p => ({ ...p, truckPlate: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-mono"
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100 font-mono"
                       />
                     </div>
 
@@ -2470,7 +2503,7 @@ export default function App() {
                           required
                           value={expenseForm.amount}
                           onChange={e => setExpenseForm(p => ({ ...p, amount: parseInt(e.target.value) || 0 }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-mono"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100 font-mono"
                         />
                       </div>
                       <div>
@@ -2478,7 +2511,7 @@ export default function App() {
                         <select
                           value={expenseForm.status}
                           onChange={e => setExpenseForm(p => ({ ...p, status: e.target.value as 'Paid' | 'Pending' }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white"
+                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         >
                           <option value="Paid">{T.expenses.statusPaid}</option>
                           <option value="Pending">{T.expenses.statusPendingLong}</option>
@@ -2513,12 +2546,12 @@ export default function App() {
       {/* RENDER MODAL: BILINGUAL RECEIPT VIEW & TRIGGER Browser PRINT */}
       <AnimatePresence>
         {isReceiptOpen && selectedReceipt && (
-          <div className="no-print fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative"
+              className="paper-surface bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative"
             >
 
               <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4 no-print">

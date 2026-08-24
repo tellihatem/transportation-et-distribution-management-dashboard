@@ -38,6 +38,7 @@ import {
 } from 'recharts';
 import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary } from '../types';
 import { T } from '../strings';
+import type { ChartTheme } from '../chart-theme';
 import { calcResale } from '../../server/resale-math';
 
 interface ExecutiveOverviewTabProps {
@@ -47,6 +48,8 @@ interface ExecutiveOverviewTabProps {
   clientSummaries: ClientSummary[];
   driverSummaries: DriverSummary[];
   onNavigateTab: (tab: 'transport' | 'resale' | 'expenses' | 'clients' | 'drivers' | 'suppliers') => void;
+  /** Chart colours for the active theme — see src/chart-theme.ts. */
+  charts: ChartTheme;
 }
 
 const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4'];
@@ -57,7 +60,8 @@ export function ExecutiveOverviewTab({
   expenses,
   clientSummaries,
   driverSummaries,
-  onNavigateTab
+  onNavigateTab,
+  charts
 }: ExecutiveOverviewTabProps) {
 
   // Global Financial Calculations
@@ -237,11 +241,11 @@ export function ExecutiveOverviewTab({
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={cashflowChartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="name" stroke="#94a3b8" tick={{ fontSize: 12 }} />
-                <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                <CartesianGrid strokeDasharray="3 3" stroke={charts.grid} />
+                <XAxis dataKey="name" stroke={charts.axis} tick={{ fontSize: 12 }} />
+                <YAxis stroke={charts.axis} tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#f8fafc' }}
+                  contentStyle={{ backgroundColor: charts.tooltipBg, borderColor: charts.tooltipBorder, borderRadius: '12px', color: charts.tooltipText }}
                   formatter={(value: any) => [`${Number(value).toLocaleString()} ${T.common.currency}`, T.overview.chartAmountLabel]}
                 />
                 <Bar dataKey="value" radius={[8, 8, 0, 0]}>
