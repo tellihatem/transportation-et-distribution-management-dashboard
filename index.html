@@ -9,6 +9,13 @@
 
 <body>
   <div id="root"></div>
+  <!-- Applies the saved theme before React mounts, so a light-mode user never
+       sees the dark palette flash on the way in. -->
+  <script>
+    try {
+      if (localStorage.getItem('theme') === 'light') document.documentElement.dataset.theme = 'light';
+    } catch (e) { /* storage blocked: fall back to the dark default */ }
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

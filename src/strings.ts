@@ -653,6 +653,9 @@ export const T = {
   header: {
     logoAlt: "شعار الشركة",
     exportBackup: "تصدير نسخة احتياطية",
+    /** Theme switch — labelled with the mode it switches *to*. */
+    themeToLight: "الوضع الفاتح",
+    themeToDark: "الوضع الداكن",
     exportBackupTitle: "تصدير نسخة احتياطية من قاعدة البيانات",
     importBackup: "استيراد نسخة احتياطية",
     importBackupTitle: "استيراد نسخة احتياطية إلى قاعدة البيانات",
