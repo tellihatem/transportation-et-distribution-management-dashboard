@@ -46,7 +46,7 @@ export const T = {
    * ──────────────────────────────────────────────────────────────────────── */
   brand: {
     /** Company name — appears in the app header, invoices and statements. */
-    companyName: "نقل وتوزيع البضائع لعلاوي عبد المالك",
+    companyName: "شركة لعلاوي عبد الرحيم لبيع مواد البناء",
     /** Small badge next to the company name in the header. */
     safeModeBadge: "وضع آمن",
     /** One-line description of what the app does, under the company name. */

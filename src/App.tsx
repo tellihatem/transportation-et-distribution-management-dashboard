@@ -66,7 +66,7 @@ import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { SupplierAccountsTab } from "./components/SupplierAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId, fetchTripById, fetchResaleById } from "./api/client";
-import logoUrl from "../assets/canvas.png";
+import logoUrl from "../assets/logo.png";
 import { T } from "./strings";
 import { calcResale } from "../server/resale-math";
 
@@ -741,7 +741,7 @@ export default function App() {
           <div className="max-w-2xl mx-auto border-2 border-dashed border-slate-400 p-8 rounded-lg bg-white text-black space-y-6">
             <div className="flex justify-between items-center border-b-2 border-slate-800 pb-4">
               <div className="flex items-center gap-3">
-                <img src={logoUrl} alt={T.header.logoAlt} className="h-16 w-16 object-contain shrink-0" />
+                <img src={logoUrl} alt={T.header.logoAlt} className="h-16 w-auto max-w-[150px] object-contain shrink-0" />
                 <div>
                   <h1 className="text-2xl font-bold font-display text-slate-950">{T.brand.companyName}</h1>
                   <p className="text-xs text-slate-500">{T.facture.subtitle}</p>
@@ -900,8 +900,8 @@ export default function App() {
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
 
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-700 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/10">
-                  <img src={logoUrl} alt={T.header.logoAlt} width={60} height={60} className="object-contain" />
+                <div className="h-12 px-2.5 rounded-2xl bg-[#f8faef] border border-slate-700/40 flex items-center justify-center shadow-lg shadow-blue-500/10">
+                  <img src={logoUrl} alt={T.header.logoAlt} className="h-9 w-auto max-w-[120px] object-contain" />
                 </div>
                 <div>
                   <h1 className="text-2xl font-black tracking-tight font-display bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
