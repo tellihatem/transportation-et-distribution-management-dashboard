@@ -39,6 +39,7 @@ import {
 import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary } from '../types';
 import { T } from '../strings';
 import type { ChartTheme } from '../chart-theme';
+import { tripClientFee } from '../../server/trip-math';
 import { calcResale } from '../../server/resale-math';
 
 interface ExecutiveOverviewTabProps {
@@ -73,7 +74,7 @@ export function ExecutiveOverviewTab({
     let transportTons = 0;
 
     trips.forEach(t => {
-      const fee = (t.truckCost || 0) + (t.driverCut || 0) + (t.companyProfit || 0);
+      const fee = tripClientFee(t);
       transportInvoiced += fee;
       transportDriverWages += (t.driverCut || 0);
       transportCompanyProfit += (t.companyProfit || 0);

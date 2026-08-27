@@ -12,6 +12,7 @@ const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
 const ledgers_1 = require("../ledgers");
+const trip_math_1 = require("../trip-math");
 const router = (0, express_1.Router)();
 /**
  * GET /api/client-payments — List all client payments with allocations
@@ -90,7 +91,7 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
         let transportInvoiced = 0;
         let transportPaid = 0;
         trips.forEach(t => {
-            const fee = t.truck_cost + t.driver_cut + t.company_profit;
+            const fee = (0, trip_math_1.tripClientFee)({ truckCost: t.truck_cost });
             transportInvoiced += fee;
             transportPaid += (t.client_paid ?? 0);
         });
@@ -111,7 +112,7 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
         const unallocatedCredit = Math.max(0, totalPaymentsReceived - totalAllocatedPaid);
         const outstandingReceivable = Math.max(0, totalInvoiced - totalAllocatedPaid);
         const totalTripsCount = trips.length + resales.length;
-        const unpaidTripsCount = trips.filter(t => (t.client_paid ?? 0) < (t.truck_cost + t.driver_cut + t.company_profit)).length +
+        const unpaidTripsCount = trips.filter(t => (t.client_paid ?? 0) < (0, trip_math_1.tripClientFee)({ truckCost: t.truck_cost })).length +
             resales.filter(r => (r.client_paid ?? 0) < r.client_selling_price).length;
         return {
             clientName: name,
@@ -136,7 +137,7 @@ router.get('/statement/:clientName', (0, error_handler_1.asyncHandler)(async (re
     const payments = database_1.default.prepare('SELECT * FROM client_payments WHERE client_name = ? ORDER BY date DESC').all(name);
     const itemizedTrips = [
         ...trips.map(t => {
-            const fee = t.truck_cost + t.driver_cut + t.company_profit;
+            const fee = (0, trip_math_1.tripClientFee)({ truckCost: t.truck_cost });
             return {
                 type: 'transport',
                 id: t.id,

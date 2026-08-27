@@ -68,6 +68,7 @@ import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { SupplierAccountsTab } from "./components/SupplierAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { chartTheme } from "./chart-theme";
+import { tripClientFee, tripCompanyProfit } from "../server/trip-math";
 import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId, fetchTripById, fetchResaleById } from "./api/client";
 import logoUrl from "../assets/logo.png";
 import { T } from "./strings";
@@ -190,7 +191,7 @@ export default function App() {
     totalTonnage: 30,
     quantityUnit: T.common.defaultUnit,
     truckCost: 15000,
-    driverCut: 5000,
+    driverCut: 10000,
     companyProfit: 5000,
     driverName: "",
   });
@@ -226,7 +227,12 @@ export default function App() {
   });
 
   // Automatically compute Total Fee suggestion for Tab 1 as feedback in form
-  const computedFormTotalTransportFee = (Number(tripForm.truckCost) || 0) + (Number(tripForm.driverCut) || 0) + (Number(tripForm.companyProfit) || 0);
+  // The hire is the whole price; the profit is what it leaves after the wage.
+  const computedFormTotalTransportFee = tripClientFee({ truckCost: Number(tripForm.truckCost) });
+  const computedFormCompanyProfit = tripCompanyProfit({
+    truckCost: Number(tripForm.truckCost) || 0,
+    driverCut: Number(tripForm.driverCut) || 0,
+  });
 
   // Live figures for the resale modal. Every number the form shows comes from
   // this one call, so the goods section, the transport section and the profit
@@ -306,7 +312,7 @@ export default function App() {
     let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
 
     filteredClientTrips.forEach(trip => {
-      const tripFee = trip.truckCost + trip.driverCut + trip.companyProfit;
+      const tripFee = tripClientFee(trip);
       grossRevenue += tripFee;
       driverPayout += trip.driverCut;
       netMargin += trip.companyProfit;
@@ -421,8 +427,8 @@ export default function App() {
         totalTonnage: 32,
         quantityUnit: T.common.defaultUnit,
         truckCost: 15000,
-        driverCut: 5000,
-        companyProfit: 6000,
+        driverCut: 10000,
+        companyProfit: 5000,
         driverName: "",
       });
     } else if (targetType === "resale") {
@@ -521,7 +527,7 @@ export default function App() {
           quantityUnit: tripForm.quantityUnit || T.common.defaultUnit,
           truckCost: Number(tripForm.truckCost) || 0,
           driverCut: Number(tripForm.driverCut) || 0,
-          companyProfit: Number(tripForm.companyProfit) || 0,
+          companyProfit: computedFormCompanyProfit,
           driverName: tripForm.driverName || ""
         };
 
@@ -814,7 +820,7 @@ export default function App() {
 
             {(() => {
               const factureTotal = selectedReceipt.type === "transport"
-                ? selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit
+                ? tripClientFee(selectedReceipt.data)
                 : selectedReceipt.data.clientSellingPrice;
               const facturePaid = selectedReceipt.data.clientPaid || 0;
               const factureRemaining = factureTotal - facturePaid;
@@ -1479,7 +1485,7 @@ export default function App() {
                               </tr>
                             ) : (
                               filteredClientTrips.map(trip => {
-                                const totalCost = trip.truckCost + trip.driverCut + trip.companyProfit;
+                                const totalCost = tripClientFee(trip);
                                 return (
                                   <tr key={trip.id} className="hover:bg-slate-800/40 transition">
                                     <td className="p-3 font-mono font-bold text-blue-400">{trip.id}</td>
@@ -2172,13 +2178,15 @@ export default function App() {
                         </div>
                         <div>
                           <label className="block text-slate-500 mb-1">{T.form.companyProfit}</label>
-                          <input
-                            type="number"
-                            required
-                            value={tripForm.companyProfit}
-                            onChange={e => setTripForm(p => ({ ...p, companyProfit: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
-                          />
+                          {/* Derived, never typed: the hire less the wage. */}
+                          <div
+                            title={T.form.companyProfitDerivedHint}
+                            className={`w-full bg-slate-900/60 border border-slate-800 p-1.5 rounded font-mono font-bold ${
+                              computedFormCompanyProfit < 0 ? "text-rose-400" : "text-emerald-400"
+                            }`}
+                          >
+                            {computedFormCompanyProfit.toLocaleString()}
+                          </div>
                         </div>
                       </div>
                       <div className="pt-2 text-[10px] text-slate-400 flex justify-between">
@@ -2608,22 +2616,17 @@ export default function App() {
                         <span>{T.receiptPreview.costSheetTitle}</span>
                         <span className="text-[9px] text-slate-400">{T.receiptPreview.currencyNote}</span>
                       </h4>
+                      {/* One priced line. The driver's wage and the company's
+                          margin come out of this figure and are no business of
+                          the client's, so they are not on their invoice. */}
                       <div className="flex justify-between py-1 text-slate-600">
                         <span>{T.receiptPreview.truckHire}</span>
-                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.driverWage}</span>
-                        <span className="font-mono">{selectedReceipt.data.driverCut.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.companyProfit}</span>
-                        <span className="font-mono text-cyan-800 font-bold">+{selectedReceipt.data.companyProfit.toLocaleString()} {T.common.currency}</span>
+                        <span className="font-mono">{tripClientFee(selectedReceipt.data).toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900 bg-slate-105">
                         <span>{T.receiptPreview.invoiceTotal}</span>
                         <span className="font-mono text-emerald-600 text-sm">
-                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit).toLocaleString()} {T.common.currency}
+                          {tripClientFee(selectedReceipt.data).toLocaleString()} {T.common.currency}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
@@ -2633,12 +2636,8 @@ export default function App() {
                       <div className="flex justify-between py-1 font-bold">
                         <span className="text-slate-800">{T.receiptPreview.clientRemaining}</span>
                         <span className="font-mono text-amber-700">
-                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} {T.common.currency}
+                          {(tripClientFee(selectedReceipt.data) - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} {T.common.currency}
                         </span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
-                        <span>{T.receiptPreview.driverPaidLine(selectedReceipt.data.driverName || T.receiptPreview.unknownDriver)}</span>
-                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCut.toLocaleString()} {T.common.currency}</span>
                       </div>
                     </div>
                   </div>

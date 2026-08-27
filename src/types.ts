@@ -20,7 +20,8 @@ export interface ClientTransportTrip {
   // Read-only: recomputed server-side from the payment ledgers. Never sent by forms.
   clientPaid: number;    // Amount the client has paid so far (toward the total fee)
   driverPaid: number;    // Amount paid to the driver so far (toward driverCut)
-  // Computed field: Total Transport Fee = truckCost + driverCut + companyProfit
+  // What the client owes is truckCost alone — the wage comes out of it and
+  // companyProfit is the remainder. See server/trip-math.ts.
 }
 
 // Tab 2: Material Resale Transaction Record

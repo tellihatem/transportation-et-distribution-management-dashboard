@@ -8,6 +8,7 @@ import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
 import { syncTripClientPaid, allocateClientPayment } from '../ledgers';
+import { tripClientFee } from '../trip-math';
 
 const router = Router();
 
@@ -101,7 +102,7 @@ router.get('/summary', asyncHandler(async (_req: Request, res: Response) => {
     let transportInvoiced = 0;
     let transportPaid = 0;
     trips.forEach(t => {
-      const fee = t.truck_cost + t.driver_cut + t.company_profit;
+      const fee = tripClientFee({ truckCost: t.truck_cost });
       transportInvoiced += fee;
       transportPaid += (t.client_paid ?? 0);
     });
@@ -127,7 +128,7 @@ router.get('/summary', asyncHandler(async (_req: Request, res: Response) => {
     const outstandingReceivable = Math.max(0, totalInvoiced - totalAllocatedPaid);
 
     const totalTripsCount = trips.length + resales.length;
-    const unpaidTripsCount = trips.filter(t => (t.client_paid ?? 0) < (t.truck_cost + t.driver_cut + t.company_profit)).length +
+    const unpaidTripsCount = trips.filter(t => (t.client_paid ?? 0) < tripClientFee({ truckCost: t.truck_cost })).length +
       resales.filter(r => (r.client_paid ?? 0) < r.client_selling_price).length;
 
     return {
@@ -157,7 +158,7 @@ router.get('/statement/:clientName', asyncHandler(async (req: Request, res: Resp
 
   const itemizedTrips = [
     ...trips.map(t => {
-      const fee = t.truck_cost + t.driver_cut + t.company_profit;
+      const fee = tripClientFee({ truckCost: t.truck_cost });
       return {
         type: 'transport' as const,
         id: t.id,

@@ -27,6 +27,7 @@ exports.applyDriverAdvance = applyDriverAdvance;
 exports.releaseStaleAllocations = releaseStaleAllocations;
 exports.reconcileWork = reconcileWork;
 const database_1 = __importDefault(require("./database"));
+const trip_math_1 = require("./trip-math");
 /** Per-trip driver wage: the resale table stores it per trip, not per deal. */
 exports.RESALE_DRIVER_WAGE_SQL = 'MAX(1, COALESCE(trip_count, 1)) * driver_cost';
 /** Recalculate a trip/resale's client_paid cache from the allocation rows. */
@@ -60,9 +61,9 @@ function syncTripDriverPaid(tripType, tripId) {
 /** Work this client still owes money on, oldest first. */
 function unpaidClientWork(clientName) {
     const trips = database_1.default.prepare(`
-    SELECT id, 'transport' as trip_type, date, (truck_cost + driver_cut + company_profit) as total_fee, client_paid as paid
+    SELECT id, 'transport' as trip_type, date, ${trip_math_1.TRIP_CLIENT_FEE_SQL} as total_fee, client_paid as paid
     FROM client_trips
-    WHERE client_name = ? AND client_paid < (truck_cost + driver_cut + company_profit)
+    WHERE client_name = ? AND client_paid < ${trip_math_1.TRIP_CLIENT_FEE_SQL}
     ORDER BY date ASC
   `).all(clientName);
     const resales = database_1.default.prepare(`
@@ -174,7 +175,7 @@ function releaseStaleAllocations(tripType, tripId) {
     if (!row)
         return;
     const clientFee = tripType === 'transport'
-        ? (row.truck_cost ?? 0) + (row.driver_cut ?? 0) + (row.company_profit ?? 0)
+        ? (0, trip_math_1.tripClientFee)({ truckCost: row.truck_cost })
         : (row.client_selling_price ?? 0);
     const driverFee = tripType === 'transport'
         ? (row.driver_cut ?? 0)

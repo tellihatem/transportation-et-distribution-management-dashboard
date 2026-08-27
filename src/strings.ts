@@ -896,10 +896,12 @@ export const T = {
     unitPlaceholder: "الوحدة",
     /** Cost breakdown box for a transport trip. */
     costBreakdownTitle: "تجزئة التكلفة والصافي",
-    truckHire: "تأجير الشاحنة",
-    driverWage: "أجرة السائق",
-    companyProfit: "ربح الشركة الصافي",
-    estimatedTotalFee: "إجمالي تعريفة النقل التقديرية للعميل:",
+    truckHire: "تأجير الشاحنة (السعر المتفق عليه مع العميل)",
+    driverWage: "أجرة السائق (تُدفع من سعر التأجير)",
+    companyProfit: "ربح الشركة الصافي (تلقائي)",
+    /** Explains why the profit box cannot be typed into. */
+    companyProfitDerivedHint: "يُحسب تلقائياً: تأجير الشاحنة ناقص أجرة السائق",
+    estimatedTotalFee: "المبلغ المستحق على العميل (سعر التأجير):",
 
     /* --- Resale fields --- */
     resaleId: "رقم عملية التوريد",
