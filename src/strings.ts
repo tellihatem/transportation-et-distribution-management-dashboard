@@ -933,7 +933,9 @@ export const T = {
     /** Logistics cost box for a resale. */
     logisticsTitle: "تحليل تحليل التكلفة اللوجستية",
     resaleDriverCost: "كلفة السائق",
-    explicitMargin: "الهامش البارز",
+    explicitMargin: "هامش النقل (تلقائي)",
+    /** Explains why the transport-margin box cannot be typed into. */
+    explicitMarginDerivedHint: "يُحسب تلقائياً: تأجير الشاحنة ناقص أجرة السائق",
     hiddenMarginLabel: "قيمة الربح الخفي:",
     trueProfitLabel: "إجمالي صافي الربح الحقيقي:",
     /** Trips box. Every delivery is at least one trip; the box above gives

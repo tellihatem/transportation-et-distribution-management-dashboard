@@ -211,7 +211,7 @@ export default function App() {
     clientSellingPrice: 150000,
     truckCost: 18000,
     driverCost: 5000,
-    explicitProfit: 8000,
+    explicitProfit: 0,
     driverName: "",
     tripCount: 1,
   });
@@ -244,7 +244,6 @@ export default function App() {
     totalTonnage: Number(resaleForm.totalTonnage) || 0,
     truckCost: Number(resaleForm.truckCost) || 0,
     driverCost: Number(resaleForm.driverCost) || 0,
-    explicitProfit: Number(resaleForm.explicitProfit) || 0,
     tripCount: Number(resaleForm.tripCount) || 1,
   });
 
@@ -447,7 +446,7 @@ export default function App() {
         clientSellingPrice: 180000,
         truckCost: 18000,
         driverCost: 5000,
-        explicitProfit: 8000,
+        explicitProfit: 0,
         driverName: "",
         tripCount: 1,
       });
@@ -550,7 +549,7 @@ export default function App() {
           quantityUnit: resaleForm.quantityUnit || T.common.defaultUnit,
           truckCost: Number(resaleForm.truckCost) || 0,
           driverCost: Number(resaleForm.driverCost) || 0,
-          explicitProfit: Number(resaleForm.explicitProfit) || 0,
+          explicitProfit: resaleCalc.marginPerTrip,
           driverName: resaleForm.driverName || "",
           tripCount: Math.max(1, Number(resaleForm.tripCount) || 1),
         };
@@ -2388,13 +2387,15 @@ export default function App() {
                         </div>
                         <div>
                           <label className="block text-slate-500 mb-1">{T.form.explicitMargin}</label>
-                          <input
-                            type="number"
-                            required
-                            value={resaleForm.explicitProfit}
-                            onChange={e => setResaleForm(p => ({ ...p, explicitProfit: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
-                          />
+                          {/* Derived, never typed: the hire less the wage. */}
+                          <div
+                            title={T.form.explicitMarginDerivedHint}
+                            className={`w-full bg-slate-900/60 border border-slate-800 p-1 rounded font-mono font-bold ${
+                              resaleCalc.marginPerTrip < 0 ? "text-rose-400" : "text-emerald-400"
+                            }`}
+                          >
+                            {resaleCalc.marginPerTrip.toLocaleString()}
+                          </div>
                         </div>
                       </div>
 
@@ -2658,38 +2659,38 @@ export default function App() {
                         <span>{T.receiptPreview.pricingAnalysisTitle}</span>
                         <span className="text-[10px] text-slate-400 font-mono">{T.receiptPreview.recordNoLabel} {selectedReceipt.data.id}</span>
                       </h4>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.truckHireLong}</span>
-                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.driverWage}</span>
-                        <span className="font-mono">{selectedReceipt.data.driverCost.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      {/* Internal sheet, so the real per-trip arithmetic is
-                          shown here: trips x (truck + driver + profit). */}
+                      {/* Internal sheet, so the per-trip arithmetic is spelled
+                          out — all of it from the shared resale math, never
+                          re-derived here. */}
                       {(() => {
-                        const trips = Math.max(1, selectedReceipt.data.tripCount || 1);
-                        const perTrip = selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit;
+                        const m = calcResale(selectedReceipt.data);
                         return (
-                          <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100 pt-2">
-                            <span>{T.receiptPreview.tripCountLabel}</span>
-                            <span className="font-mono">
-                              {trips} × {perTrip.toLocaleString()} {T.common.currency} = {(trips * perTrip).toLocaleString()} {T.common.currency}
-                            </span>
-                          </div>
+                          <>
+                            <div className="flex justify-between py-1 text-slate-600">
+                              <span>{T.receiptPreview.truckHireLong}</span>
+                              <span className="font-mono">{m.costPerTrip.toLocaleString()} {T.common.currency}</span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600">
+                              <span>{T.receiptPreview.driverWage}</span>
+                              <span className="font-mono">{(selectedReceipt.data.driverCost || 0).toLocaleString()} {T.common.currency}</span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100 pt-2">
+                              <span>{T.receiptPreview.tripCountLabel}</span>
+                              <span className="font-mono">
+                                {m.trips} × {m.costPerTrip.toLocaleString()} {T.common.currency} = {m.transportTotal.toLocaleString()} {T.common.currency}
+                              </span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600">
+                              <span>{T.receiptPreview.explicitTransportMargin}</span>
+                              <span className="font-mono text-slate-700">+{m.marginPerTrip.toLocaleString()} {T.common.currency}</span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600 font-bold bg-amber-50 px-2 rounded">
+                              <span className="text-amber-800">{T.receiptPreview.hiddenProfit}</span>
+                              <span className="font-mono text-amber-700">{m.hiddenProfit.toLocaleString()} {T.common.currency}</span>
+                            </div>
+                          </>
                         );
                       })()}
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.explicitTransportMargin}</span>
-                        <span className="font-mono text-slate-700">+{selectedReceipt.data.explicitProfit.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600 font-bold bg-amber-50 px-2 rounded">
-                        <span className="text-amber-800">{T.receiptPreview.hiddenProfit}</span>
-                        <span className="font-mono text-amber-700">
-                          {+(selectedReceipt.data.clientSellingPrice - ((selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage) + selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit)).toLocaleString()} {T.common.currency}
-                        </span>
-                      </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900">
                         <span>{T.receiptPreview.finalSellingTotal}</span>
                         <span className="font-mono text-emerald-600 text-sm">

@@ -116,7 +116,7 @@ router.get('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
  * POST /api/resales — Create new resale
  */
 router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
-    const { id, date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
+    const { id, date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, driverName, tripCount } = req.body;
     if (!id || !date || !endClient) {
         throw (0, error_handler_1.createApiError)('Missing required fields: id, date, endClient', 400, 'VALIDATION_ERROR');
     }
@@ -128,19 +128,19 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     // the goods and transport figures, so the two invoice lines always add up
     // to the amount the ledgers settle against.
     const trips = (0, resale_math_1.resaleTripCount)({ tripCount });
-    const invoiceTotal = (0, resale_math_1.calcInvoiceTotal)({
+    const money = (0, resale_math_1.calcResale)({
         factoryPurchasePrice: factoryPurchasePrice || 0,
         productUnitPrice: productUnitPrice || 0,
         totalTonnage: totalTonnage || 0,
         truckCost: truckCost || 0,
         driverCost: driverCost || 0,
-        explicitProfit: explicitProfit || 0,
         tripCount: trips,
     });
+    const invoiceTotal = money.invoiceTotal;
     database_1.default.prepare(`
     INSERT INTO material_resales (id, date, end_client, destination, material_type, origin_factory, factory_purchase_price, product_unit_price, total_tonnage, quantity_unit, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, trip_count)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice || 0, productUnitPrice || 0, totalTonnage || 0, quantityUnit || 'طن', invoiceTotal, truckCost || 0, driverCost || 0, explicitProfit || 0, driverName || '', trips);
+  `).run(id, date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice || 0, productUnitPrice || 0, totalTonnage || 0, quantityUnit || 'طن', invoiceTotal, truckCost || 0, driverCost || 0, money.marginPerTrip, driverName || '', trips);
     (0, ledgers_1.reconcileWork)({ tripType: 'resale', tripId: id, clientNames: [endClient], driverNames: [driverName] });
     const created = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(id);
     (0, replicator_1.queueSync)('material_resales', id, 'upsert', created);
@@ -153,7 +153,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT * FROM material_resales WHERE id = ?').get(req.params.id);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Resale not found', 404, 'NOT_FOUND');
-    const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, explicitProfit, driverName, tripCount } = req.body;
+    const { date, endClient, destination, materialType, originFactory, factoryPurchasePrice, productUnitPrice, totalTonnage, quantityUnit, truckCost, driverCost, driverName, tripCount } = req.body;
     // Reassigning the shipment to a different supplier invalidates any payments
     // already applied to it under the old supplier's account — those allocation
     // rows are removed and their money returns to the old supplier's net
@@ -163,10 +163,11 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         database_1.default.prepare('UPDATE material_resales SET supplier_paid = 0 WHERE id = ?').run(req.params.id);
     }
     const trips = (0, resale_math_1.resaleTripCount)({ tripCount });
-    const invoiceTotal = (0, resale_math_1.calcInvoiceTotal)({
+    const money = (0, resale_math_1.calcResale)({
         factoryPurchasePrice, productUnitPrice: productUnitPrice || 0,
-        totalTonnage, truckCost, driverCost, explicitProfit, tripCount: trips,
+        totalTonnage, truckCost, driverCost, tripCount: trips,
     });
+    const invoiceTotal = money.invoiceTotal;
     database_1.default.prepare(`
     UPDATE material_resales SET
       date = ?, end_client = ?, destination = ?, material_type = ?, origin_factory = ?, factory_purchase_price = ?, product_unit_price = ?, total_tonnage = ?, quantity_unit = ?,
@@ -174,7 +175,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
       explicit_profit = ?, driver_name = ?, trip_count = ?,
       updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice, productUnitPrice || 0, totalTonnage, quantityUnit || 'طن', invoiceTotal, truckCost, driverCost, explicitProfit, driverName || '', trips, req.params.id);
+  `).run(date, endClient, destination || '', materialType || '', originFactory || '', factoryPurchasePrice, productUnitPrice || 0, totalTonnage, quantityUnit || 'طن', invoiceTotal, truckCost, driverCost, money.marginPerTrip, driverName || '', trips, req.params.id);
     // Same reasoning as the supplier block above, for the client and driver
     // sides: whoever the shipment left keeps their money as credit.
     (0, ledgers_1.reconcileWork)({

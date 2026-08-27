@@ -8,28 +8,33 @@
  * Deliberately pure: no imports, no I/O, no rounding. Money keeps its exact
  * value all the way through.
  *
+ * Transport follows the same rule as a plain transport trip (server/trip-math.ts):
+ * تأجير الشاحنة is the whole charge for a trip, أجرة السائق is paid out of it,
+ * and the margin is the difference rather than a figure anyone types.
+ *
  * The model, with the worked example (1,500 buy / 4,500 sell × 40 units,
- * one trip of 18,000 + 5,000 + 8,000):
+ * one trip hired at 31,000 with a 5,000 driver wage):
  *
  *   Goods
  *     totalBuyCost       = factoryPurchasePrice × quantity      60,000
  *     totalSellRevenue   = productUnitPrice     × quantity     180,000
  *     grossProductProfit = totalSellRevenue - totalBuyCost     120,000
  *
- *   Transport (all three figures are PER TRIP)
- *     costPerTrip        = truck + driver + visible margin       31,000
+ *   Transport (both figures are PER TRIP)
+ *     costPerTrip        = truckCost, the hire, whole            31,000
+ *     marginPerTrip      = truckCost - driverCost                26,000
  *     transportTotal     = tripCount × costPerTrip               31,000
  *
  *   Profit
  *     hiddenProfit       = grossProductProfit - transportTotal   89,000
- *     netRealProfit      = hiddenProfit + tripCount × margin     97,000
+ *     netRealProfit      = hiddenProfit + tripCount × margin    115,000
  *
  *   Invoice
  *     invoiceTotal       = totalSellRevenue + transportTotal    211,000
  *
- * netRealProfit is equivalently grossProductProfit − tripCount × (truck +
- * driver): the visible margin added back is the part of the transport charge
- * that is profit rather than cost. Both readings agree at any trip count.
+ * netRealProfit is equivalently grossProductProfit − tripCount × driverCost:
+ * the driver's wage is the only part of a trip that costs the company money,
+ * because the truck is its own. Both readings agree at any trip count.
  */
 
 /** The numbers a resale calculation needs. Field names match MaterialResaleTx. */
@@ -39,7 +44,6 @@ export interface ResaleInputs {
   totalTonnage: number;
   truckCost: number;
   driverCost: number;
-  explicitProfit: number;
   tripCount?: number;
 }
 
@@ -49,6 +53,8 @@ export interface ResaleTotals {
   totalSellRevenue: number;
   grossProductProfit: number;
   costPerTrip: number;
+  /** The part of one trip's charge that is profit: the hire less the wage. */
+  marginPerTrip: number;
   transportTotal: number;
   hiddenProfit: number;
   netRealProfit: number;
@@ -68,12 +74,12 @@ export function calcResale(tx: ResaleInputs): ResaleTotals {
   const totalSellRevenue = (Number(tx.productUnitPrice) || 0) * qty;
   const grossProductProfit = totalSellRevenue - totalBuyCost;
 
-  const costPerTrip =
-    (Number(tx.truckCost) || 0) + (Number(tx.driverCost) || 0) + (Number(tx.explicitProfit) || 0);
+  const costPerTrip = Number(tx.truckCost) || 0;
+  const marginPerTrip = costPerTrip - (Number(tx.driverCost) || 0);
   const transportTotal = trips * costPerTrip;
 
   const hiddenProfit = grossProductProfit - transportTotal;
-  const netRealProfit = hiddenProfit + trips * (Number(tx.explicitProfit) || 0);
+  const netRealProfit = hiddenProfit + trips * marginPerTrip;
 
   return {
     trips,
@@ -81,6 +87,7 @@ export function calcResale(tx: ResaleInputs): ResaleTotals {
     totalSellRevenue,
     grossProductProfit,
     costPerTrip,
+    marginPerTrip,
     transportTotal,
     hiddenProfit,
     netRealProfit,

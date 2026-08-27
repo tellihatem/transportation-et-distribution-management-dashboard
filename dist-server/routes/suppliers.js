@@ -41,7 +41,6 @@ function resaleSupplierCost(row) {
         totalTonnage: row.total_tonnage,
         truckCost: 0,
         driverCost: 0,
-        explicitProfit: 0,
     }).totalBuyCost;
 }
 const RESALE_SUPPLIER_COST_SQL = 'factory_purchase_price * total_tonnage';

@@ -37,15 +37,15 @@ export interface MaterialResaleTx {
   totalTonnage: number;
   quantityUnit: string;  // Unit the quantity is measured in (طن، وحدة، متر مكعب…)
   // Invoice total billed to the client. DERIVED, not typed:
-  //   productUnitPrice × totalTonnage  +  tripCount × (truckCost + driverCost + explicitProfit)
+  //   productUnitPrice × totalTonnage  +  tripCount × truckCost
   // Kept as a stored field because the payment ledgers settle against it.
   clientSellingPrice: number;
-  truckCost: number;     // Truck logistics cost
-  driverCost: number;    // Driver payment
-  explicitProfit: number; // Declared profit for transport
+  truckCost: number;     // The hire: the whole transport charge, per trip
+  driverCost: number;    // Driver's wage, paid out of the hire
+  explicitProfit: number; // Derived: truckCost - driverCost. Stored, never typed.
   driverName: string;    // Which driver did the delivery
-  // How many truck trips the delivery took. Always at least 1. truckCost,
-  // driverCost and explicitProfit are all PER TRIP, so this multiplies them.
+  // How many truck trips the delivery took. Always at least 1. Every
+  // transport figure above is PER TRIP, so this multiplies them.
   tripCount: number;
   // Read-only: recomputed server-side from the payment ledgers. Never sent by forms.
   clientPaid: number;    // Amount the client has paid so far (toward clientSellingPrice)
@@ -54,10 +54,10 @@ export interface MaterialResaleTx {
   // - Total Buy Cost       = factoryPurchasePrice * totalTonnage
   // - Total Sell Revenue   = productUnitPrice     * totalTonnage
   // - Gross Product Profit = Total Sell Revenue - Total Buy Cost
-  // - Cost Per Trip        = truckCost + driverCost + explicitProfit
+  // - Cost Per Trip        = truckCost (the hire, whole)
   // - Transport Total      = tripCount * Cost Per Trip
   // - Hidden Profit        = Gross Product Profit - Transport Total
-  // - Net Real Profit      = Hidden Profit + tripCount * explicitProfit
+  // - Net Real Profit      = Hidden Profit + tripCount * (truckCost - driverCost)
   // - Invoice Total        = Total Sell Revenue + Transport Total
 }
 
