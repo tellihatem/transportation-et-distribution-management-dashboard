@@ -52,7 +52,6 @@ import {
   ComposedChart,
   Line
 } from "recharts";
-import { motion, AnimatePresence } from "motion/react";
 
 import { ClientTransportTrip, ClientTransportTripInput, MaterialResaleTx, MaterialResaleTxInput, OtherExpense, TabFilters } from "./types";
 import { TRANSLATE_EXPENSE_CATEGORY, EXPENSE_CATEGORIES } from "./data";
@@ -1254,16 +1253,10 @@ export default function App() {
 
         {/* CONTAINER CONTENT ACCORDING TO TABS */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-          <AnimatePresence mode="wait">
 
             {/* TAB OVERVIEW: EXECUTIVE DASHBOARD */}
             {activeTab === "overview" && (
-              <motion.div
-                key="tab-overview"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-overview" className="panel-enter">
                 <ExecutiveOverviewTab
                   trips={clientTrips}
                   resales={resaleTxs}
@@ -1273,17 +1266,12 @@ export default function App() {
                   onNavigateTab={tab => setActiveTab(tab)}
                   charts={charts}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB CLIENTS: CLIENT ACCOUNTS & RECEIVABLES */}
             {activeTab === "clients" && (
-              <motion.div
-                key="tab-clients"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-clients" className="panel-enter">
                 <ClientAccountsTab
                   summaries={clientSummaries}
                   loading={false}
@@ -1293,17 +1281,12 @@ export default function App() {
                   onDeletePayment={removeClientPaymentRecord}
                   onRefreshTrips={refreshAllData}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB DRIVERS: DRIVER ACCOUNTS & SETTLEMENTS */}
             {activeTab === "drivers" && (
-              <motion.div
-                key="tab-drivers"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-drivers" className="panel-enter">
                 <DriverAccountsTab
                   summaries={driverSummaries}
                   loading={false}
@@ -1314,17 +1297,12 @@ export default function App() {
                   onEditTrip={handleEditTripById}
                   onRefreshTrips={refreshAllData}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB SUPPLIERS: SUPPLIER/FACTORY BALANCES & DEBTS */}
             {activeTab === "suppliers" && (
-              <motion.div
-                key="tab-suppliers"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-suppliers" className="panel-enter">
                 <SupplierAccountsTab
                   summaries={supplierSummaries}
                   loading={false}
@@ -1338,18 +1316,12 @@ export default function App() {
                   onDeductAdvance={deductSupplierAdvance}
                   onRefresh={refreshAllData}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB 1: CLIENT TRANSPORT (شحن لصالح العملاء) */}
             {activeTab === "transport" && (
-              <motion.div
-                key="tab-transport"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="space-y-6"
-              >
+              <div key="tab-transport" className="panel-enter space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1556,18 +1528,12 @@ export default function App() {
                   </div>
 
                 </div>
-              </motion.div>
+              </div>
             )}
 
             {/* TAB 2: MATERIAL RESALE (شراء وإعادة بيع المواد) */}
             {activeTab === "resale" && (
-              <motion.div
-                key="tab-resale"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="space-y-6"
-              >
+              <div key="tab-resale" className="panel-enter space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1774,18 +1740,12 @@ export default function App() {
                   </div>
 
                 </div>
-              </motion.div>
+              </div>
             )}
 
             {/* TAB 3: OTHER EXPENSES (المصاريف الأخرى الأسطول) */}
             {activeTab === "expenses" && (
-              <motion.div
-                key="tab-expenses"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="space-y-6"
-              >
+              <div key="tab-expenses" className="panel-enter space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1934,10 +1894,9 @@ export default function App() {
                   </div>
 
                 </div>
-              </motion.div>
+              </div>
             )}
 
-          </AnimatePresence>
         </section>
 
       </div>
@@ -2002,15 +1961,9 @@ export default function App() {
       )}
 
       {/* RENDER MODAL: FOR ADD/EDIT WORKFLOW */}
-      <AnimatePresence>
         {isModalOpen && (
           <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 max-w-lg w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative"
-            >
+            <div className="modal-enter bg-slate-900 border border-slate-800 max-w-lg w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative">
               <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
 
               <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-5">
@@ -2547,21 +2500,14 @@ export default function App() {
                 </div>
 
               </form>
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
       {/* RENDER MODAL: BILINGUAL RECEIPT VIEW & TRIGGER Browser PRINT */}
-      <AnimatePresence>
         {isReceiptOpen && selectedReceipt && (
           <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="paper-surface bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative"
-            >
+            <div className="modal-enter paper-surface bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative">
 
               <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4 no-print">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
@@ -2747,10 +2693,9 @@ export default function App() {
                 </button>
               </div>
 
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
     </div>
   );

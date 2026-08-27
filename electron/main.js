@@ -155,6 +155,12 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // Chromium throttles timers and animation frames in a window it thinks
+      // nobody is looking at — minimised, fully covered by another window, or
+      // on a machine that has gone to sleep. This is a dashboard someone
+      // leaves open all day behind other windows, and coming back to a page
+      // whose timers stopped is how it ends up feeling stuck. Keep it running.
+      backgroundThrottling: false,
     },
   });
 

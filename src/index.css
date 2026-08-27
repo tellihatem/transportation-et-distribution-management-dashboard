@@ -8,6 +8,42 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
+ *  Entrance animations
+ *
+ *  These replace the JavaScript animation library that used to wrap the tab
+ *  panels and the modals. That library drove its animations from
+ *  requestAnimationFrame and held each panel in the DOM until its *exit*
+ *  animation finished. When the renderer stops painting — the window
+ *  minimised, fully covered, or the machine asleep — those frames never come,
+ *  so an exit never completes: the outgoing panel stays, the incoming one
+ *  never mounts, and a modal's full-screen backdrop can be left sitting
+ *  invisibly over the page swallowing every click and keystroke. The app looks
+ *  alive but will not take input, and only a reload clears it.
+ *
+ *  CSS keyframes cannot fail that way, and note there is deliberately no
+ *  animation-fill-mode: outside the animation's run the element keeps its
+ *  ordinary styles. If the animation never runs at all, the panel simply
+ *  appears, fully opaque and fully usable, instead of being stuck at nothing.
+ * ────────────────────────────────────────────────────────────────────────── */
+@keyframes panel-enter {
+  from { opacity: 0; transform: translateY(15px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modal-enter {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.panel-enter { animation: panel-enter 220ms ease-out; }
+.modal-enter { animation: modal-enter 160ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-enter,
+  .modal-enter { animation: none; }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
  *  Light mode
  *
  *  The whole UI is written in one palette: slate for every surface and every
