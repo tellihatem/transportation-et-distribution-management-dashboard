@@ -8,39 +8,48 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- *  Entrance animations
+ *  No entrance animations, deliberately
  *
- *  These replace the JavaScript animation library that used to wrap the tab
- *  panels and the modals. That library drove its animations from
- *  requestAnimationFrame and held each panel in the DOM until its *exit*
- *  animation finished. When the renderer stops painting — the window
- *  minimised, fully covered, or the machine asleep — those frames never come,
- *  so an exit never completes: the outgoing panel stays, the incoming one
- *  never mounts, and a modal's full-screen backdrop can be left sitting
- *  invisibly over the page swallowing every click and keystroke. The app looks
- *  alive but will not take input, and only a reload clears it.
+ *  The tab panels and dialogs used to animate in — first through a JavaScript
+ *  library, then briefly through CSS keyframes here. Both had the same flaw in
+ *  a window that is not being painted (minimised, covered, asleep): the
+ *  animation never advances past its first frame, and the first frame is a
+ *  `transform`. An element with a transform becomes the containing block for
+ *  every `position: fixed` descendant, which quietly re-anchors each dialog to
+ *  its panel instead of the window — so on a scrolled or zoomed-in page the
+ *  dialog opens somewhere off-screen with parts of it unreachable.
  *
- *  CSS keyframes cannot fail that way, and note there is deliberately no
- *  animation-fill-mode: outside the animation's run the element keeps its
- *  ordinary styles. If the animation never runs at all, the panel simply
- *  appears, fully opaque and fully usable, instead of being stuck at nothing.
+ *  A decorative fade is not worth a dialog nobody can reach. Panels and
+ *  dialogs now simply appear.
  * ────────────────────────────────────────────────────────────────────────── */
-@keyframes panel-enter {
-  from { opacity: 0; transform: translateY(15px); }
-  to   { opacity: 1; transform: translateY(0); }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ *  Dialog overlays scroll
+ *
+ *  Every dialog is a full-screen overlay that centres its card. Centring alone
+ *  breaks the moment the card is taller than the window — zoomed in, on a
+ *  short screen, or with a long form — because the overflow goes equally above
+ *  and below, and the part above the top edge cannot be scrolled to at all.
+ *  The client hit this by zooming in: the save button sat below the screen with
+ *  no way to reach it.
+ *
+ *  `safe` is what fixes it: the card stays centred while it fits, and the
+ *  moment it does not, alignment falls back to the start edge so everything is
+ *  reachable by scrolling. The overlay itself is the scroll container.
+ * ────────────────────────────────────────────────────────────────────────── */
+.dialog-scroll {
+  overflow-y: auto;
+  /* Start-aligned so the top of a tall card is never pushed out of reach... */
+  align-items: flex-start;
 }
 
-@keyframes modal-enter {
-  from { opacity: 0; transform: scale(0.95); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-.panel-enter { animation: panel-enter 220ms ease-out; }
-.modal-enter { animation: modal-enter 160ms ease-out; }
-
-@media (prefers-reduced-motion: reduce) {
-  .panel-enter,
-  .modal-enter { animation: none; }
+/* ...and auto margins put the centring back for cards that do fit. Auto
+   margins absorb the free space when there is some and collapse to nothing
+   when there is not, which is exactly the behaviour wanted here — unlike
+   `align-items: safe center`, which this engine accepts and then ignores. */
+.dialog-scroll > * {
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

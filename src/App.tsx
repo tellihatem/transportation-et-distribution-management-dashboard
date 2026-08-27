@@ -1256,7 +1256,7 @@ export default function App() {
 
             {/* TAB OVERVIEW: EXECUTIVE DASHBOARD */}
             {activeTab === "overview" && (
-              <div key="tab-overview" className="panel-enter">
+              <div key="tab-overview" className="">
                 <ExecutiveOverviewTab
                   trips={clientTrips}
                   resales={resaleTxs}
@@ -1271,7 +1271,7 @@ export default function App() {
 
             {/* TAB CLIENTS: CLIENT ACCOUNTS & RECEIVABLES */}
             {activeTab === "clients" && (
-              <div key="tab-clients" className="panel-enter">
+              <div key="tab-clients" className="">
                 <ClientAccountsTab
                   summaries={clientSummaries}
                   loading={false}
@@ -1286,7 +1286,7 @@ export default function App() {
 
             {/* TAB DRIVERS: DRIVER ACCOUNTS & SETTLEMENTS */}
             {activeTab === "drivers" && (
-              <div key="tab-drivers" className="panel-enter">
+              <div key="tab-drivers" className="">
                 <DriverAccountsTab
                   summaries={driverSummaries}
                   loading={false}
@@ -1302,7 +1302,7 @@ export default function App() {
 
             {/* TAB SUPPLIERS: SUPPLIER/FACTORY BALANCES & DEBTS */}
             {activeTab === "suppliers" && (
-              <div key="tab-suppliers" className="panel-enter">
+              <div key="tab-suppliers" className="">
                 <SupplierAccountsTab
                   summaries={supplierSummaries}
                   loading={false}
@@ -1321,7 +1321,7 @@ export default function App() {
 
             {/* TAB 1: CLIENT TRANSPORT (شحن لصالح العملاء) */}
             {activeTab === "transport" && (
-              <div key="tab-transport" className="panel-enter space-y-6">
+              <div key="tab-transport" className="space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1533,7 +1533,7 @@ export default function App() {
 
             {/* TAB 2: MATERIAL RESALE (شراء وإعادة بيع المواد) */}
             {activeTab === "resale" && (
-              <div key="tab-resale" className="panel-enter space-y-6">
+              <div key="tab-resale" className="space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1745,7 +1745,7 @@ export default function App() {
 
             {/* TAB 3: OTHER EXPENSES (المصاريف الأخرى الأسطول) */}
             {activeTab === "expenses" && (
-              <div key="tab-expenses" className="panel-enter space-y-6">
+              <div key="tab-expenses" className="space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1903,7 +1903,7 @@ export default function App() {
 
       {/* RENDER MODAL: WIPE THE DATABASE (irreversible — typed confirmation) */}
       {isResetOpen && (
-        <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex dialog-scroll justify-center p-4">
           <div className="bg-slate-900 border border-rose-900/70 max-w-md w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative dir-rtl">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-600 to-red-500"></div>
 
@@ -1962,8 +1962,8 @@ export default function App() {
 
       {/* RENDER MODAL: FOR ADD/EDIT WORKFLOW */}
         {isModalOpen && (
-          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="modal-enter bg-slate-900 border border-slate-800 max-w-lg w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative">
+          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex dialog-scroll justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 max-w-lg w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative">
               <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
 
               <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-5">
@@ -2506,8 +2506,8 @@ export default function App() {
 
       {/* RENDER MODAL: BILINGUAL RECEIPT VIEW & TRIGGER Browser PRINT */}
         {isReceiptOpen && selectedReceipt && (
-          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-            <div className="modal-enter paper-surface bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative">
+          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex dialog-scroll justify-center p-4">
+            <div className="paper-surface bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative">
 
               <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4 no-print">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">

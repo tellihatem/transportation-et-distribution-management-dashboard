@@ -556,7 +556,7 @@ export function SupplierAccountsTab({
 
       {/* RECORD PAYMENT MODAL */}
       {isPaymentModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-cyan-400 font-bold text-lg">
@@ -707,7 +707,7 @@ export function SupplierAccountsTab({
 
       {/* RECORD DEBT/INVOICE MODAL */}
       {isInvoiceModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
@@ -810,7 +810,7 @@ export function SupplierAccountsTab({
           The manual drawdown: pick a delivery, take its cost off the advance
           the supplier is holding. */}
       {isDeductModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-blue-900/70 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-blue-300 font-bold text-lg">
@@ -917,7 +917,7 @@ export function SupplierAccountsTab({
       {/* CORRECT A RECORDED SUPPLIER PAYMENT
           Above the statement (z-60) because it is opened from inside it. */}
       {editingId && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
@@ -1070,7 +1070,7 @@ export function SupplierAccountsTab({
       {/* CORRECT A RECORDED DEBT/INVOICE
           Above the statement (z-60) because it is opened from inside it. */}
       {editingInvoiceId && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
@@ -1169,7 +1169,7 @@ export function SupplierAccountsTab({
 
       {/* STATEMENT MODAL */}
       {isStatementModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex dialog-scroll justify-center p-4 no-print">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-800/80">
               <div className="flex items-center gap-2 text-cyan-400 font-bold text-lg">
