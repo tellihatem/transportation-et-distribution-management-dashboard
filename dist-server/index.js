@@ -67,7 +67,11 @@ const client_payments_1 = __importDefault(require("./routes/client-payments"));
 const driver_payments_1 = __importDefault(require("./routes/driver-payments"));
 const suppliers_1 = require("./routes/suppliers");
 const app = (0, express_1.default)();
-const PORT = parseInt(process.env.PORT || '3001', 10);
+// The port to try first. The dev frontend proxies to 3001, so that stays the
+// preference — but it is only a preference: see startServer().
+const PREFERRED_PORT = parseInt(process.env.PORT || '3001', 10);
+/** The port actually bound. 0 until the server is listening. */
+let boundPort = 0;
 let httpServer = null;
 let syncInterval = null;
 let initialSyncTimeout = null;
@@ -213,28 +217,61 @@ if (fs_1.default.existsSync(distPath)) {
 // --- Error Handler (must be last) ---
 app.use(error_handler_1.errorHandler);
 // --- Start Server Function ---
+/**
+ * Bind one port, resolving with the port actually taken, or reject.
+ *
+ * Port 0 asks the operating system for any free port, which is what makes the
+ * retry in startServer() always succeed.
+ */
+function listenOn(port) {
+    return new Promise((resolve, reject) => {
+        const server = app.listen(port, '0.0.0.0', () => {
+            httpServer = server;
+            boundPort = server.address().port;
+            resolve(boundPort);
+        });
+        server.on('error', reject);
+    });
+}
+/**
+ * Start the API, and do not refuse to run because something else holds the
+ * usual port.
+ *
+ * This used to bind a fixed 3001 and give up if it was taken — by another
+ * program, or by a copy of this app that had not fully exited. All the desktop
+ * app could say was that the local server would not start, and the only cure
+ * was hunting down whatever held the port. Nothing needs the number to be
+ * 3001: Electron loads whatever port this returns.
+ */
 function startServer() {
     if (httpServer) {
-        return Promise.resolve(PORT);
+        return Promise.resolve(boundPort);
     }
     if (startPromise) {
         return startPromise;
     }
-    startPromise = new Promise((resolve, reject) => {
-        httpServer = app.listen(PORT, '0.0.0.0', () => {
-            console.log(`[SERVER] ✅ API running on http://localhost:${PORT}`);
-            console.log(`[SERVER] 📡 Health: http://localhost:${PORT}/api/health`);
-            console.log('[SERVER] ─────────────────────────────────────────────────\n');
-            startBackgroundSync();
-            resolve(PORT);
-            startPromise = null;
-        });
-        httpServer.on('error', (error) => {
-            console.error('[SERVER] Failed to start server:', error);
-            httpServer = null;
-            startPromise = null;
-            reject(error);
-        });
+    const announce = (port) => {
+        console.log(`[SERVER] ✅ API running on http://localhost:${port}`);
+        console.log(`[SERVER] 📡 Health: http://localhost:${port}/api/health`);
+        console.log('[SERVER] ─────────────────────────────────────────────────');
+        console.log();
+        startBackgroundSync();
+        startPromise = null;
+        return port;
+    };
+    const giveUp = (error) => {
+        console.error('[SERVER] Failed to start server:', error);
+        httpServer = null;
+        startPromise = null;
+        throw error;
+    };
+    startPromise = listenOn(PREFERRED_PORT)
+        .then(announce)
+        .catch((error) => {
+        if (error?.code !== 'EADDRINUSE')
+            return giveUp(error);
+        console.warn(`[SERVER] Port ${PREFERRED_PORT} is in use; asking the system for a free one.`);
+        return listenOn(0).then(announce).catch(giveUp);
     });
     return startPromise;
 }
