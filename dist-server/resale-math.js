@@ -27,15 +27,20 @@
  *     transportTotal     = tripCount × costPerTrip               31,000
  *
  *   Profit
- *     hiddenProfit       = grossProductProfit - transportTotal   89,000
- *     netRealProfit      = hiddenProfit + tripCount × margin    115,000
+ *     netRealProfit      = grossProductProfit
+ *                          + tripCount × marginPerTrip          146,000
  *
  *   Invoice
  *     invoiceTotal       = totalSellRevenue + transportTotal    211,000
  *
- * netRealProfit is equivalently grossProductProfit − tripCount × driverCost:
- * the driver's wage is the only part of a trip that costs the company money,
- * because the truck is its own. Both readings agree at any trip count.
+ * Transport is NOT a deduction from profit: the client pays the transport
+ * charge on top of the goods, so each trip's hire is revenue, its wage the
+ * only cost, and the margin between them adds to the goods profit. Written
+ * out: netRealProfit = invoiceTotal − totalBuyCost − tripCount × driverCost —
+ * everything the client pays, less the goods and the wages. Both readings
+ * agree at any trip count. (An earlier model subtracted the whole transport
+ * charge from the goods margin as "hidden profit", which understated profit
+ * by exactly the transport revenue; that figure is gone.)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resaleTripCount = resaleTripCount;
@@ -54,8 +59,7 @@ function calcResale(tx) {
     const costPerTrip = Number(tx.truckCost) || 0;
     const marginPerTrip = costPerTrip - (Number(tx.driverCost) || 0);
     const transportTotal = trips * costPerTrip;
-    const hiddenProfit = grossProductProfit - transportTotal;
-    const netRealProfit = hiddenProfit + trips * marginPerTrip;
+    const netRealProfit = grossProductProfit + trips * marginPerTrip;
     return {
         trips,
         totalBuyCost,
@@ -64,7 +68,6 @@ function calcResale(tx) {
         costPerTrip,
         marginPerTrip,
         transportTotal,
-        hiddenProfit,
         netRealProfit,
         invoiceTotal: totalSellRevenue + transportTotal,
     };

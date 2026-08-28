@@ -26,15 +26,20 @@
  *     transportTotal     = tripCount × costPerTrip               31,000
  *
  *   Profit
- *     hiddenProfit       = grossProductProfit - transportTotal   89,000
- *     netRealProfit      = hiddenProfit + tripCount × margin    115,000
+ *     netRealProfit      = grossProductProfit
+ *                          + tripCount × marginPerTrip          146,000
  *
  *   Invoice
  *     invoiceTotal       = totalSellRevenue + transportTotal    211,000
  *
- * netRealProfit is equivalently grossProductProfit − tripCount × driverCost:
- * the driver's wage is the only part of a trip that costs the company money,
- * because the truck is its own. Both readings agree at any trip count.
+ * Transport is NOT a deduction from profit: the client pays the transport
+ * charge on top of the goods, so each trip's hire is revenue, its wage the
+ * only cost, and the margin between them adds to the goods profit. Written
+ * out: netRealProfit = invoiceTotal − totalBuyCost − tripCount × driverCost —
+ * everything the client pays, less the goods and the wages. Both readings
+ * agree at any trip count. (An earlier model subtracted the whole transport
+ * charge from the goods margin as "hidden profit", which understated profit
+ * by exactly the transport revenue; that figure is gone.)
  */
 
 /** The numbers a resale calculation needs. Field names match MaterialResaleTx. */
@@ -56,7 +61,6 @@ export interface ResaleTotals {
   /** The part of one trip's charge that is profit: the hire less the wage. */
   marginPerTrip: number;
   transportTotal: number;
-  hiddenProfit: number;
   netRealProfit: number;
   invoiceTotal: number;
 }
@@ -78,8 +82,7 @@ export function calcResale(tx: ResaleInputs): ResaleTotals {
   const marginPerTrip = costPerTrip - (Number(tx.driverCost) || 0);
   const transportTotal = trips * costPerTrip;
 
-  const hiddenProfit = grossProductProfit - transportTotal;
-  const netRealProfit = hiddenProfit + trips * marginPerTrip;
+  const netRealProfit = grossProductProfit + trips * marginPerTrip;
 
   return {
     trips,
@@ -89,7 +92,6 @@ export function calcResale(tx: ResaleInputs): ResaleTotals {
     costPerTrip,
     marginPerTrip,
     transportTotal,
-    hiddenProfit,
     netRealProfit,
     invoiceTotal: totalSellRevenue + transportTotal,
   };

@@ -800,14 +800,14 @@ export const T = {
     kpiVisibleTransport: "أجور النقل الظاهرة",
     kpiVisibleTransportHint: "رسوم النقل المقيدة على المعاملة",
     kpiTrueProfit: "إجمالي الربح الحقيقي",
-    kpiTrueProfitHint: "يشمل الربح الخفي والهامش الظاهر",
+    kpiTrueProfitHint: "مجمل ربح البضاعة زائد هامش النقل",
     kpiClientOutstanding: "متبقي على العملاء",
     kpiClientOutstandingHint: "مبالغ لم يسددها الزبائن بعد",
     kpiDriverOutstanding: "متبقي للسائقين",
     kpiDriverOutstandingHint: "مستحقات لم تُدفع للسائقين بعد",
 
     chartTitle: "مقارنة كلفة شراء السلع بعوائد البيع",
-    chartSubtitle: "يعكس بوضوح الكفاءة النقدية للشركة وإجمالي الربح الخفي",
+    chartSubtitle: "يعكس بوضوح الكفاءة النقدية للشركة وصافي الربح الحقيقي",
     chartEmpty: "لا توجد بيانات كافية",
     legendPurchase: "كلفة الشراء",
     legendSales: "مبيعات التوريد",
@@ -819,7 +819,7 @@ export const T = {
     colDate: "التاريخ",
     colEndClient: "الزبون النهائي",
     colPricing: "تفاصيل الأسعار",
-    colHiddenMargin: "الهامش الخفي",
+    colHiddenMargin: "مجمل ربح البضاعة",
     colTrueProfit: "إجمالي الكسب الحقيقي",
     colClientPayments: "مدفوعات العميل",
     colDriverPayments: "السائق ومدفوعاته",
@@ -936,7 +936,6 @@ export const T = {
     explicitMargin: "هامش النقل (تلقائي)",
     /** Explains why the transport-margin box cannot be typed into. */
     explicitMarginDerivedHint: "يُحسب تلقائياً: تأجير الشاحنة ناقص أجرة السائق",
-    hiddenMarginLabel: "قيمة الربح الخفي:",
     trueProfitLabel: "إجمالي صافي الربح الحقيقي:",
     /** Trips box. Every delivery is at least one trip; the box above gives
      *  the cost of ONE trip, and this multiplies it. */
@@ -1041,7 +1040,7 @@ export const T = {
     truckHireLong: "تأجير الشاحنة البرية:",
     tripCountLabel: "عدد الرحلات:",
     explicitTransportMargin: "هامش النقل الصريح:",
-    hiddenProfit: "الأرباح الخفية من التسعير:",
+    netRealProfit: "إجمالي صافي الربح الحقيقي:",
     finalSellingTotal: "سعر البيع النهائي الإجمالي:",
     buyerPaid: "المدفوع من الزبون:",
     buyerRemaining: "المتبقي على الزبون:",

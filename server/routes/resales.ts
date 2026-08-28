@@ -75,7 +75,6 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
   let capitalOutlay = 0;        // what the goods cost us
   let grossProductProfit = 0;   // goods margin, before any transport
   let transportTotal = 0;       // trips × cost per trip
-  let hiddenProfit = 0;
   let totalTrueProfit = 0;      // net real profit
   let totalTons = 0;
 
@@ -86,7 +85,6 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
     capitalOutlay += m.totalBuyCost;
     grossProductProfit += m.grossProductProfit;
     transportTotal += m.transportTotal;
-    hiddenProfit += m.hiddenProfit;
     totalTrueProfit += m.netRealProfit;
     totalTons += row.total_tonnage;
   });
@@ -95,7 +93,7 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
     success: true,
     data: {
       tradingTurnover, capitalOutlay, grossProductProfit,
-      transportTotal, hiddenProfit, totalTrueProfit, totalTons,
+      transportTotal, totalTrueProfit, totalTons,
     },
   });
 }));

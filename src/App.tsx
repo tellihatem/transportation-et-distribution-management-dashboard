@@ -1666,7 +1666,7 @@ export default function App() {
                               filteredResaleTxs.map(tx => {
                                 const m = calcResale(tx);
                                 const sourcingCost = m.totalBuyCost;
-                                const hiddenMargin = m.hiddenProfit;
+                                const goodsMargin = m.grossProductProfit;
                                 const totalTrueProfit = m.netRealProfit;
 
                                 return (
@@ -1684,8 +1684,8 @@ export default function App() {
                                       <div>{T.resale.cellSelling} {tx.clientSellingPrice.toLocaleString()}</div>
                                       <div className="text-[10px] text-slate-500">{T.resale.cellCost} {sourcingCost.toLocaleString()}</div>
                                     </td>
-                                    <td className={`p-3 font-mono font-semibold ${hiddenMargin >= 0 ? "text-amber-400" : "text-rose-400"}`}>
-                                      {hiddenMargin.toLocaleString()} {T.common.currency}
+                                    <td className={`p-3 font-mono font-semibold ${goodsMargin >= 0 ? "text-amber-400" : "text-rose-400"}`}>
+                                      {goodsMargin.toLocaleString()} {T.common.currency}
                                     </td>
                                     <td className="p-3 font-mono font-bold text-emerald-400">
                                       {totalTrueProfit.toLocaleString()} {T.common.currency}
@@ -2384,11 +2384,7 @@ export default function App() {
                         a goods or a transport number. */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-emerald-900/60 space-y-2">
                       <span className="text-[10px] text-emerald-400 font-bold block">{T.form.profitSummaryTitle}</span>
-                      <div className="flex justify-between text-[10px] text-slate-400">
-                        <span>{T.form.hiddenMarginLabel}</span>
-                        <strong className="text-amber-400 font-mono">{resaleCalc.hiddenProfit.toLocaleString()} {T.common.currency}</strong>
-                      </div>
-                      <div className="pt-2 text-[11px] border-t border-slate-800 flex justify-between text-slate-300">
+                      <div className="pt-1 text-[11px] flex justify-between text-slate-300">
                         <span className="font-bold">{T.form.trueProfitLabel}</span>
                         <strong className="text-emerald-400 font-mono text-sm">{resaleCalc.netRealProfit.toLocaleString()} {T.common.currency}</strong>
                       </div>
@@ -2630,9 +2626,9 @@ export default function App() {
                               <span>{T.receiptPreview.explicitTransportMargin}</span>
                               <span className="font-mono text-slate-700">+{m.marginPerTrip.toLocaleString()} {T.common.currency}</span>
                             </div>
-                            <div className="flex justify-between py-1 text-slate-600 font-bold bg-amber-50 px-2 rounded">
-                              <span className="text-amber-800">{T.receiptPreview.hiddenProfit}</span>
-                              <span className="font-mono text-amber-700">{m.hiddenProfit.toLocaleString()} {T.common.currency}</span>
+                            <div className="flex justify-between py-1 text-slate-600 font-bold bg-emerald-50 px-2 rounded">
+                              <span className="text-emerald-800">{T.receiptPreview.netRealProfit}</span>
+                              <span className="font-mono text-emerald-700">{m.netRealProfit.toLocaleString()} {T.common.currency}</span>
                             </div>
                           </>
                         );

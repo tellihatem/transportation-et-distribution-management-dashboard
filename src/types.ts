@@ -55,9 +55,9 @@ export interface MaterialResaleTx {
   // - Total Sell Revenue   = productUnitPrice     * totalTonnage
   // - Gross Product Profit = Total Sell Revenue - Total Buy Cost
   // - Cost Per Trip        = truckCost (the hire, whole)
-  // - Transport Total      = tripCount * Cost Per Trip
-  // - Hidden Profit        = Gross Product Profit - Transport Total
-  // - Net Real Profit      = Hidden Profit + tripCount * (truckCost - driverCost)
+  // - Transport Total      = tripCount * Cost Per Trip (billed to the client)
+  // - Net Real Profit      = Gross Product Profit + tripCount * (truckCost - driverCost)
+  //   (transport is client-paid revenue, so it is never deducted from profit)
   // - Invoice Total        = Total Sell Revenue + Transport Total
 }
 
