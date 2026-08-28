@@ -34,12 +34,62 @@
         line-height: 1.6;
         color: #cbd5e1;
       }
+      /* The technical reason. LTR because it is an English error string, and
+         selectable so it can be copied into a support message as-is. */
+      pre {
+        direction: ltr;
+        text-align: left;
+        margin: 1rem 0 0;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        background: rgba(2, 6, 23, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        color: #fca5a5;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        user-select: text;
+        max-height: 12rem;
+        overflow-y: auto;
+      }
+      .logline {
+        margin-top: 0.75rem;
+        font-size: 0.75rem;
+        color: #94a3b8;
+      }
+      .logline code {
+        direction: ltr;
+        unicode-bidi: embed;
+        font-size: 0.72rem;
+        color: #cbd5e1;
+        word-break: break-all;
+        user-select: text;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>تعذر تشغيل لوحة التحكم</h1>
-      <p>تعذر تشغيل الخادم المحلي. أعد تشغيل البرنامج، وإذا استمرت المشكلة تواصل مع الدعم الفني.</p>
+      <p>تعذر تشغيل الخادم المحلي. أعد تشغيل البرنامج، وإذا استمرت المشكلة أرسل التفاصيل أدناه إلى الدعم الفني.</p>
+      <pre id="reason" hidden></pre>
+      <p class="logline" id="logline" hidden>حُفظت التفاصيل الكاملة في: <code id="logpath"></code></p>
     </main>
+    <script>
+      // main.js hands the failure over as query parameters; a page with no
+      // parameters (opened by hand) just shows the generic text.
+      const q = new URLSearchParams(location.search);
+      const message = q.get('message');
+      if (message) {
+        const el = document.getElementById('reason');
+        el.textContent = message;
+        el.hidden = false;
+      }
+      const log = q.get('log');
+      if (log) {
+        document.getElementById('logpath').textContent = log;
+        document.getElementById('logline').hidden = false;
+      }
+    </script>
   </body>
 </html>

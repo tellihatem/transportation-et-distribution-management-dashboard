@@ -198,13 +198,41 @@ app.whenReady().then(async () => {
     await createWindow();
   } catch (error) {
     console.error('Failed to start local server:', error);
+
+    // The 1.13.0 field failure ("تعذر تشغيل الخادم المحلي" on the client's
+    // machine) took a debugging session to diagnose because this screen said
+    // nothing about the cause — the real error (EADDRINUSE on port 3001) was
+    // only in a console nobody sees. The failure now travels with its details:
+    // written to a log file support can ask for by name, and handed to the
+    // error page so the reason is on the screen itself.
+    const details = [
+      `time     : ${new Date().toISOString()}`,
+      `version  : ${app.getVersion()} (packaged: ${app.isPackaged})`,
+      `database : ${process.env.DATABASE_PATH || '(unset)'}`,
+      `userData : ${app.getPath('userData')}`,
+      ``,
+      String(error?.stack || error),
+    ].join(String.fromCharCode(10));
+
+    let logPath = '';
+    try {
+      logPath = path.join(app.getPath('userData'), 'startup-error.log');
+      fs.writeFileSync(logPath, details, 'utf-8');
+    } catch {
+      logPath = ''; // userData unwritable: the on-screen copy still shows everything
+    }
+
     // The backend starts BEFORE the window is created, so a database error
     // means no window exists yet — without this the app would keep running
     // invisibly with nothing on screen and no way to see what went wrong.
     if (!mainWindow) {
-      mainWindow = new BrowserWindow({ width: 700, height: 500, show: false });
+      mainWindow = new BrowserWindow({ width: 760, height: 560, show: false });
     }
-    await mainWindow.loadFile(errorPage).catch(() => {});
+    await mainWindow
+      .loadFile(errorPage, {
+        query: { message: String(error?.message || error), log: logPath },
+      })
+      .catch(() => {});
     mainWindow.show();
   }
 
