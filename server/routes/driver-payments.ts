@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
-import { syncTripDriverPaid, allocateDriverPayment, RESALE_DRIVER_WAGE_SQL, applyDriverAdvance, manualAllocationError, MONEY_EPSILON } from '../ledgers';
+import { syncTripDriverPaid, allocateDriverPayment, RESALE_DRIVER_WAGE_SQL, applyDriverAdvance, applyManualAllocations, MONEY_EPSILON } from '../ledgers';
 
 // NOTE deliberately no queueSync here: the payment/allocation tables are
 // local-only (no Supabase mirror). Queuing deletes for them errors into
@@ -266,25 +266,10 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     let remainingToAllocate = amount;
 
     if (allocationMode === 'manual' && Array.isArray(allocations)) {
-      for (const alloc of allocations) {
-        if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0) continue;
-        const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-        if (allocAmt <= 0) break;
-
-        // A bad manual row must fail loudly now, not poison the ledger until
-        // the next work edit tears down the whole row's allocations.
-        const problem = manualAllocationError('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
-        if (problem) {
-          throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
-        }
-
-        db.prepare(`
-          INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, alloc.tripType, alloc.tripId, allocAmt);
-
-        syncTripDriverPaid(alloc.tripType, alloc.tripId);
-        remainingToAllocate -= allocAmt;
+      try {
+        remainingToAllocate = applyManualAllocations('driver', id, driverName, remainingToAllocate, allocations);
+      } catch (err: any) {
+        throw createApiError(err.message, 400, 'VALIDATION_ERROR');
       }
     } else if (allocationMode === 'auto') {
       // Same routine the correction path uses, so the two cannot diverge.
@@ -344,17 +329,12 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     if (allocationMode === 'auto') {
       allocateDriverPayment(paymentId, driverName, amount);
     } else if (allocationMode === 'manual' && Array.isArray(allocations)) {
-      let remainingToAllocate = amount;
-      for (const alloc of allocations) {
-        if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0) continue;
-        const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-        if (allocAmt <= 0) break;
-        const problem = manualAllocationError('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
-        if (problem) throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
-        db.prepare(`INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount) VALUES (?, ?, ?, ?)`)
-          .run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
-        syncTripDriverPaid(alloc.tripType, alloc.tripId);
-        remainingToAllocate -= allocAmt;
+      // Same rules as POST — an edited receipt may keep hand-placed rows
+      // rather than silently converting them into an advance.
+      try {
+        applyManualAllocations('driver', paymentId, driverName, amount, allocations);
+      } catch (err: any) {
+        throw createApiError(err.message, 400, 'VALIDATION_ERROR');
       }
     }
   });

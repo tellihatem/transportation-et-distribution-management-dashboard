@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
-import { syncTripClientPaid, allocateClientPayment, applyClientCredit, manualAllocationError, MONEY_EPSILON } from '../ledgers';
+import { syncTripClientPaid, allocateClientPayment, applyClientCredit, applyManualAllocations, MONEY_EPSILON } from '../ledgers';
 import { TRIP_CLIENT_FEE_SQL } from '../trip-math';
 import { tripClientFee } from '../trip-math';
 
@@ -253,25 +253,10 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     let remainingToAllocate = amount;
 
     if (allocationMode === 'manual' && Array.isArray(allocations)) {
-      for (const alloc of allocations) {
-        if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0) continue;
-        const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-        if (allocAmt <= 0) break;
-
-        // A bad manual row must fail loudly now, not poison the ledger until
-        // the next work edit tears down the whole row's allocations.
-        const problem = manualAllocationError('client', clientName, alloc.tripType, alloc.tripId, allocAmt);
-        if (problem) {
-          throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
-        }
-
-        db.prepare(`
-          INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, alloc.tripType, alloc.tripId, allocAmt);
-
-        syncTripClientPaid(alloc.tripType, alloc.tripId);
-        remainingToAllocate -= allocAmt;
+      try {
+        remainingToAllocate = applyManualAllocations('client', id, clientName, remainingToAllocate, allocations);
+      } catch (err: any) {
+        throw createApiError(err.message, 400, 'VALIDATION_ERROR');
       }
     } else if (allocationMode === 'auto') {
       // Same routine the correction path uses, so the two cannot diverge.
@@ -329,17 +314,10 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     } else if (allocationMode === 'manual' && Array.isArray(allocations)) {
       // Same rules as POST — an edited receipt may keep hand-placed rows
       // rather than silently converting them into an advance.
-      let remainingToAllocate = amount;
-      for (const alloc of allocations) {
-        if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0) continue;
-        const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-        if (allocAmt <= 0) break;
-        const problem = manualAllocationError('client', clientName, alloc.tripType, alloc.tripId, allocAmt);
-        if (problem) throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
-        db.prepare(`INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount) VALUES (?, ?, ?, ?)`)
-          .run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
-        syncTripClientPaid(alloc.tripType, alloc.tripId);
-        remainingToAllocate -= allocAmt;
+      try {
+        applyManualAllocations('client', paymentId, clientName, amount, allocations);
+      } catch (err: any) {
+        throw createApiError(err.message, 400, 'VALIDATION_ERROR');
       }
     }
   });

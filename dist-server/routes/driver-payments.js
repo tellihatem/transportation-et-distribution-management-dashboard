@@ -240,24 +240,11 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     `).run(id, date, driverName, amount, paymentType || 'Settlement', notes || '');
         let remainingToAllocate = amount;
         if (allocationMode === 'manual' && Array.isArray(allocations)) {
-            for (const alloc of allocations) {
-                if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0)
-                    continue;
-                const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-                if (allocAmt <= 0)
-                    break;
-                // A bad manual row must fail loudly now, not poison the ledger until
-                // the next work edit tears down the whole row's allocations.
-                const problem = (0, ledgers_1.manualAllocationError)('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
-                if (problem) {
-                    throw (0, error_handler_1.createApiError)(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
-                }
-                database_1.default.prepare(`
-          INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, alloc.tripType, alloc.tripId, allocAmt);
-                (0, ledgers_1.syncTripDriverPaid)(alloc.tripType, alloc.tripId);
-                remainingToAllocate -= allocAmt;
+            try {
+                remainingToAllocate = (0, ledgers_1.applyManualAllocations)('driver', id, driverName, remainingToAllocate, allocations);
+            }
+            catch (err) {
+                throw (0, error_handler_1.createApiError)(err.message, 400, 'VALIDATION_ERROR');
             }
         }
         else if (allocationMode === 'auto') {
@@ -309,20 +296,13 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
             (0, ledgers_1.allocateDriverPayment)(paymentId, driverName, amount);
         }
         else if (allocationMode === 'manual' && Array.isArray(allocations)) {
-            let remainingToAllocate = amount;
-            for (const alloc of allocations) {
-                if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0)
-                    continue;
-                const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-                if (allocAmt <= 0)
-                    break;
-                const problem = (0, ledgers_1.manualAllocationError)('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
-                if (problem)
-                    throw (0, error_handler_1.createApiError)(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
-                database_1.default.prepare(`INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount) VALUES (?, ?, ?, ?)`)
-                    .run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
-                (0, ledgers_1.syncTripDriverPaid)(alloc.tripType, alloc.tripId);
-                remainingToAllocate -= allocAmt;
+            // Same rules as POST — an edited receipt may keep hand-placed rows
+            // rather than silently converting them into an advance.
+            try {
+                (0, ledgers_1.applyManualAllocations)('driver', paymentId, driverName, amount, allocations);
+            }
+            catch (err) {
+                throw (0, error_handler_1.createApiError)(err.message, 400, 'VALIDATION_ERROR');
             }
         }
     });

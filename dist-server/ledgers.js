@@ -24,6 +24,7 @@ exports.applyDriverAdvance = applyDriverAdvance;
 exports.releaseStaleAllocations = releaseStaleAllocations;
 exports.reconcileWork = reconcileWork;
 exports.manualAllocationError = manualAllocationError;
+exports.applyManualAllocations = applyManualAllocations;
 const database_1 = require("./database");
 const trip_math_1 = require("./trip-math");
 /** Per-trip driver wage: the resale table stores it per trip, not per deal. */
@@ -261,4 +262,36 @@ function manualAllocationError(side, partyName, tripType, tripId, amount) {
         }
     }
     return null;
+}
+/**
+ * Apply caller-supplied ("manual") allocation rows for one payment, with the
+ * same validation everywhere: the target must exist, belong to the party, and
+ * still have room. Shared by POST and PUT on both the client and the driver
+ * payment routes — the rules must be one implementation or they will drift.
+ * Throws (message suitable for a 400) on the first bad row, which rolls the
+ * caller's transaction back. Returns what remains unallocated.
+ */
+function applyManualAllocations(side, paymentId, partyName, amount, allocations) {
+    const allocTable = side === 'client' ? 'client_payment_allocations' : 'driver_payment_allocations';
+    const sync = side === 'client' ? syncTripClientPaid : syncTripDriverPaid;
+    let remaining = amount;
+    for (const alloc of allocations) {
+        if (!alloc.tripId || !alloc.tripType || !alloc.amount || alloc.amount <= 0)
+            continue;
+        const allocAmt = Math.min(alloc.amount, remaining);
+        if (allocAmt <= 0)
+            break;
+        // A bad manual row must fail loudly now, not poison the ledger until the
+        // next work edit tears down the whole row's allocations.
+        const problem = manualAllocationError(side, partyName, alloc.tripType, alloc.tripId, allocAmt);
+        if (problem)
+            throw new Error(`Invalid allocation: ${problem}`);
+        (0, database_1.cachedStmt)(`
+      INSERT INTO ${allocTable} (payment_id, trip_type, trip_id, amount)
+      VALUES (?, ?, ?, ?)
+    `).run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
+        sync(alloc.tripType, alloc.tripId);
+        remaining -= allocAmt;
+    }
+    return remaining;
 }
