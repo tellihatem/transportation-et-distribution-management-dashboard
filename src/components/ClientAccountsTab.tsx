@@ -26,6 +26,8 @@ import {
 import type { ClientSummary, ClientStatement, TabFilters } from '../types';
 import { fetchClientStatement, fetchNextClientPaymentId } from '../api/client';
 import { T } from '../strings';
+import { appAlert, appConfirm } from './AppDialogs';
+import { printPage } from '../print';
 
 interface ClientAccountsTabProps {
   summaries: ClientSummary[];
@@ -132,20 +134,20 @@ export function ClientAccountsTab({
       await openStatementForClient(editForm.clientName);
       onRefreshTrips();
     } catch (err: any) {
-      alert(T.clientAccounts.editError(err.message));
+      await appAlert(T.clientAccounts.editError(err.message));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeletePayment = async (p: ClientStatement['payments'][number], clientName: string) => {
-    if (!confirm(T.clientAccounts.deleteConfirm(p.id, p.amount.toLocaleString()))) return;
+    if (!(await appConfirm(T.clientAccounts.deleteConfirm(p.id, p.amount.toLocaleString())))) return;
     try {
       await onDeletePayment(p.id);
       await openStatementForClient(clientName);
       onRefreshTrips();
     } catch (err: any) {
-      alert(T.clientAccounts.deleteError(err.message));
+      await appAlert(T.clientAccounts.deleteError(err.message));
     }
   };
 
@@ -180,7 +182,7 @@ export function ClientAccountsTab({
       setIsPaymentModalOpen(false);
       onRefreshTrips();
     } catch (err: any) {
-      alert(T.clientAccounts.saveError(err.message));
+      await appAlert(T.clientAccounts.saveError(err.message));
     } finally {
       setSubmitting(false);
     }
@@ -212,21 +214,8 @@ export function ClientAccountsTab({
   /** Print with the party's name as the document title, so the saved PDF is
    *  named after the statement rather than after the application. */
   const printStatement = () => {
-    const originalTitle = document.title;
     const party = statementData?.clientName;
-    if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
-    let restored = false;
-    const restoreTitle = () => {
-      if (restored) return;
-      restored = true;
-      document.title = originalTitle;
-    };
-    // Electron does not always deliver afterprint (a dismissed dialog on some
-    // versions) — without the fallback each print click would leak a listener
-    // and later restore a stale title.
-    window.addEventListener('afterprint', restoreTitle, { once: true });
-    setTimeout(restoreTitle, 120000);
-    window.print();
+    void printPage(party ? `${T.printCommon.statementFilePrefix}-${party}` : undefined);
   };
 
   return (

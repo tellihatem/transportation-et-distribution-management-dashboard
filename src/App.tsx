@@ -68,6 +68,8 @@ import { SupplierAccountsTab } from "./components/SupplierAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { chartTheme } from "./chart-theme";
 import { EntryModal } from "./components/EntryModal";
+import { DialogHost, appAlert, appConfirm } from "./components/AppDialogs";
+import { printPage } from "./print";
 import { tripClientFee, tripCompanyProfit } from "../server/trip-math";
 import { downloadBackup, importBackup, resetAllData, fetchTripById, fetchResaleById, fetchExpenseStats } from "./api/client";
 import logoUrl from "../assets/logo.png";
@@ -402,12 +404,12 @@ export default function App() {
       const record = type === "transport" ? await fetchTripById(id) : await fetchResaleById(id);
       handleOpenEdit(record, type);
     } catch {
-      alert(T.driverAccounts.tripNotFound(id));
+      await appAlert(T.driverAccounts.tripNotFound(id));
     }
   };
 
   const handleDelete = async (id: string, type?: "transport" | "resale" | "expenses") => {
-    if (!confirm(T.dialogs.confirmDelete)) return;
+    if (!(await appConfirm(T.dialogs.confirmDelete))) return;
     const targetType = type || (activeTab === "resale" ? "resale" : activeTab === "expenses" ? "expenses" : "transport");
     try {
       if (targetType === "transport") {
@@ -419,7 +421,7 @@ export default function App() {
       }
       refreshAllData();
     } catch (err: any) {
-      alert(T.dialogs.deleteFailed(err.message));
+      await appAlert(T.dialogs.deleteFailed(err.message));
     }
   };
 
@@ -450,20 +452,7 @@ export default function App() {
   };
 
   const handlePrint = () => {
-    const originalTitle = document.title;
-    if (selectedReceipt) {
-      document.title = `${T.dialogs.receiptFilePrefix}-${selectedReceipt.data.id}`;
-    }
-    let restored = false;
-    const restoreTitle = () => {
-      if (restored) return;
-      restored = true;
-      document.title = originalTitle;
-    };
-    // Electron does not always deliver afterprint — see the statement tabs.
-    window.addEventListener("afterprint", restoreTitle, { once: true });
-    setTimeout(restoreTitle, 120000);
-    window.print();
+    void printPage(selectedReceipt ? `${T.dialogs.receiptFilePrefix}-${selectedReceipt.data.id}` : undefined);
   };
 
   // --- Local database backup export/import ---
@@ -482,7 +471,7 @@ export default function App() {
     e.target.value = "";
     if (!file) return;
 
-    if (!window.confirm(T.dialogs.confirmImport)) {
+    if (!(await appConfirm(T.dialogs.confirmImport))) {
       return;
     }
 
@@ -491,10 +480,10 @@ export default function App() {
       const parsed = JSON.parse(text);
       const result = await importBackup(parsed);
       const { client_trips = 0, material_resales = 0, expenses: expensesCount = 0 } = result.imported;
-      alert(T.dialogs.importSucceeded(client_trips, material_resales, expensesCount));
+      await appAlert(T.dialogs.importSucceeded(client_trips, material_resales, expensesCount));
       window.location.reload();
     } catch (err: any) {
-      alert(T.dialogs.importFailed(err.message));
+      await appAlert(T.dialogs.importFailed(err.message));
     }
   };
 
@@ -511,10 +500,10 @@ export default function App() {
     setResetting(true);
     try {
       const result = await resetAllData();
-      alert(T.reset.done(result.total));
+      await appAlert(T.reset.done(result.total));
       window.location.reload();
     } catch (err: any) {
-      alert(T.reset.failed(err.message));
+      await appAlert(T.reset.failed(err.message));
       setResetting(false);
     }
   };
@@ -556,6 +545,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-blue-600 selection:text-white" dir="rtl">
+
+      {/* In-app alert/confirm dialogs — native ones break keyboard focus in
+          Electron on Windows (see AppDialogs.tsx). */}
+      <DialogHost />
 
       {/* CSS stylesheet injection to handle Print receipts precisely on browser */}
       <style>{`

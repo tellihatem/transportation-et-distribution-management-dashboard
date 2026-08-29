@@ -32,6 +32,8 @@ import {
   fetchSupplierAvailableAdvance
 } from '../api/client';
 import { T } from '../strings';
+import { appAlert, appConfirm } from './AppDialogs';
+import { printPage } from '../print';
 
 interface SupplierAccountsTabProps {
   summaries: SupplierSummary[];
@@ -198,14 +200,14 @@ export function SupplierAccountsTab({
         targetId: item.id,
         amount,
       });
-      alert(T.supplierAccounts.deductDone(
+      await appAlert(T.supplierAccounts.deductDone(
         result.deducted.toLocaleString(),
         result.remainingAdvance.toLocaleString()
       ));
       await openDeductForSupplier(deductSupplier); // refresh the box in place
       onRefresh();
     } catch (err: any) {
-      alert(T.supplierAccounts.deductError(err.message));
+      await appAlert(T.supplierAccounts.deductError(err.message));
     } finally {
       setDeductingId(null);
     }
@@ -241,7 +243,7 @@ export function SupplierAccountsTab({
       setIsPaymentModalOpen(false);
       onRefresh();
     } catch (err: any) {
-      alert(T.supplierAccounts.saveError(err.message));
+      await appAlert(T.supplierAccounts.saveError(err.message));
     } finally {
       setSubmitting(false);
     }
@@ -262,7 +264,7 @@ export function SupplierAccountsTab({
       setIsInvoiceModalOpen(false);
       onRefresh();
     } catch (err: any) {
-      alert(T.supplierAccounts.invoiceSaveError(err.message));
+      await appAlert(T.supplierAccounts.invoiceSaveError(err.message));
     } finally {
       setSubmitting(false);
     }
@@ -301,20 +303,20 @@ export function SupplierAccountsTab({
       await openStatementForSupplier(editForm.supplierName);
       onRefresh();
     } catch (err: any) {
-      alert(T.supplierAccounts.editError(err.message));
+      await appAlert(T.supplierAccounts.editError(err.message));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeletePayment = async (p: SupplierStatement['payments'][number], supplierName: string) => {
-    if (!confirm(T.supplierAccounts.deleteConfirm(p.id, p.amount.toLocaleString()))) return;
+    if (!(await appConfirm(T.supplierAccounts.deleteConfirm(p.id, p.amount.toLocaleString())))) return;
     try {
       await onDeletePayment(p.id);
       await openStatementForSupplier(supplierName);
       onRefresh();
     } catch (err: any) {
-      alert(T.supplierAccounts.deleteError(err.message));
+      await appAlert(T.supplierAccounts.deleteError(err.message));
     }
   };
 
@@ -343,20 +345,20 @@ export function SupplierAccountsTab({
       await openStatementForSupplier(editInvoiceForm.supplierName);
       onRefresh();
     } catch (err: any) {
-      alert(T.supplierAccounts.editInvoiceError(err.message));
+      await appAlert(T.supplierAccounts.editInvoiceError(err.message));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteInvoice = async (item: SupplierStatement['itemized'][number], supplierName: string) => {
-    if (!confirm(T.supplierAccounts.deleteInvoiceConfirm(item.id, item.owed.toLocaleString()))) return;
+    if (!(await appConfirm(T.supplierAccounts.deleteInvoiceConfirm(item.id, item.owed.toLocaleString())))) return;
     try {
       await onDeleteInvoice(item.id);
       await openStatementForSupplier(supplierName);
       onRefresh();
     } catch (err: any) {
-      alert(T.supplierAccounts.deleteInvoiceError(err.message));
+      await appAlert(T.supplierAccounts.deleteInvoiceError(err.message));
     }
   };
 
@@ -384,21 +386,8 @@ export function SupplierAccountsTab({
   /** Print with the party's name as the document title, so the saved PDF is
    *  named after the statement rather than after the application. */
   const printStatement = () => {
-    const originalTitle = document.title;
     const party = statementData?.supplierName;
-    if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
-    let restored = false;
-    const restoreTitle = () => {
-      if (restored) return;
-      restored = true;
-      document.title = originalTitle;
-    };
-    // Electron does not always deliver afterprint (a dismissed dialog on some
-    // versions) — without the fallback each print click would leak a listener
-    // and later restore a stale title.
-    window.addEventListener('afterprint', restoreTitle, { once: true });
-    setTimeout(restoreTitle, 120000);
-    window.print();
+    void printPage(party ? `${T.printCommon.statementFilePrefix}-${party}` : undefined);
   };
 
   return (

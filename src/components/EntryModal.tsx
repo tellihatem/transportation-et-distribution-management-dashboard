@@ -19,6 +19,7 @@ import type { ClientTransportTripInput, MaterialResaleTxInput, OtherExpense } fr
 import { tripClientFee, tripCompanyProfit } from "../../server/trip-math";
 import { calcResale } from "../../server/resale-math";
 import { fetchNextTripId, fetchNextResaleId, fetchNextExpenseId } from "../api/client";
+import { appAlert } from "./AppDialogs";
 import { T } from "../strings";
 import { EXPENSE_CATEGORIES } from "../data";
 
@@ -190,7 +191,7 @@ export function EntryModal({ recordType, mode, initial, fallbackIds, onSubmit, o
       }
       await onSubmit(data);
     } catch (err: any) {
-      alert(T.dialogs.saveFailed(err.message));
+      await appAlert(T.dialogs.saveFailed(err.message));
     } finally {
       setSaving(false);
     }

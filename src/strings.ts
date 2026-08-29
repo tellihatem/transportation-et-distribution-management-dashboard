@@ -634,6 +634,12 @@ export const T = {
     importFailed: (message: string) => `فشل استيراد النسخة الاحتياطية: ${message}`,
     /** Filename prefix when printing a receipt (becomes e.g. "وصل-TR-12"). */
     receiptFilePrefix: "وصل",
+    /** In-app dialog chrome (replaces native alert/confirm — see AppDialogs.tsx). */
+    alertTitle: "تنبيه",
+    confirmTitle: "تأكيد العملية",
+    ok: "حسناً",
+    confirmOk: "تأكيد",
+    cancel: "إلغاء",
   },
 
   /* ────────────────────────────────────────────────────────────────────────
