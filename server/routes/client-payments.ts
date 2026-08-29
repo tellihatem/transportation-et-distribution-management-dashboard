@@ -6,7 +6,8 @@
 import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
-import { syncTripClientPaid, allocateClientPayment, applyClientCredit, manualAllocationError } from '../ledgers';
+import { syncTripClientPaid, allocateClientPayment, applyClientCredit, manualAllocationError, MONEY_EPSILON } from '../ledgers';
+import { TRIP_CLIENT_FEE_SQL } from '../trip-math';
 import { tripClientFee } from '../trip-math';
 
 // NOTE deliberately no queueSync here: the payment/allocation tables are
@@ -91,48 +92,46 @@ router.get('/next-id', asyncHandler(async (_req: Request, res: Response) => {
  */
 router.get('/summary', asyncHandler(async (_req: Request, res: Response) => {
   // Collect all distinct client names from trips, resales, and payments
-  const clientRows = db.prepare(`
-    SELECT client_name as name FROM client_trips WHERE client_name != ''
-    UNION
-    SELECT end_client as name FROM material_resales WHERE end_client != ''
-    UNION
-    SELECT client_name as name FROM client_payments WHERE client_name != ''
-  `).all() as { name: string }[];
+  // One aggregate per table instead of three full scans per client. This
+  // endpoint refires after every write (refreshAllData), and the server
+  // shares the Electron main thread — per-party loops here were the largest
+  // single source of the UI "freezing" as the day's data grew.
+  const tripAgg = new Map<string, any>();
+  for (const r of db.prepare(`
+    SELECT client_name as name,
+           SUM(${TRIP_CLIENT_FEE_SQL}) as invoiced,
+           SUM(COALESCE(client_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(client_paid, 0) < ${TRIP_CLIENT_FEE_SQL} - ${MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM client_trips WHERE client_name != '' GROUP BY client_name
+  `).all() as any[]) tripAgg.set(r.name, r);
 
-  const clientSummaries = clientRows.map(({ name }) => {
-    // 1. Transport Trips for client
-    const trips = db.prepare('SELECT * FROM client_trips WHERE client_name = ?').all(name) as any[];
-    let transportInvoiced = 0;
-    let transportPaid = 0;
-    trips.forEach(t => {
-      const fee = tripClientFee({ truckCost: t.truck_cost });
-      transportInvoiced += fee;
-      transportPaid += (t.client_paid ?? 0);
-    });
+  const resaleAgg = new Map<string, any>();
+  for (const r of db.prepare(`
+    SELECT end_client as name,
+           SUM(client_selling_price) as invoiced,
+           SUM(COALESCE(client_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(client_paid, 0) < client_selling_price - ${MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM material_resales WHERE end_client != '' GROUP BY end_client
+  `).all() as any[]) resaleAgg.set(r.name, r);
 
-    // 2. Material Resales for client
-    const resales = db.prepare('SELECT * FROM material_resales WHERE end_client = ?').all(name) as any[];
-    let resaleInvoiced = 0;
-    let resalePaid = 0;
-    resales.forEach(r => {
-      resaleInvoiced += r.client_selling_price;
-      resalePaid += (r.client_paid ?? 0);
-    });
+  const payAgg = new Map<string, number>();
+  for (const r of db.prepare(`
+    SELECT client_name as name, SUM(amount) as total
+    FROM client_payments WHERE client_name != '' GROUP BY client_name
+  `).all() as any[]) payAgg.set(r.name, r.total);
 
-    const totalInvoiced = transportInvoiced + resaleInvoiced;
+  const names = new Set<string>([...tripAgg.keys(), ...resaleAgg.keys(), ...payAgg.keys()]);
 
-    // 3. Client Payments recorded
-    const payments = db.prepare('SELECT * FROM client_payments WHERE client_name = ?').all(name) as any[];
-    const totalPaymentsReceived = payments.reduce((sum, p) => sum + p.amount, 0);
-
-    // Allocations sum
-    const totalAllocatedPaid = transportPaid + resalePaid;
+  const clientSummaries = [...names].map(name => {
+    const t = tripAgg.get(name);
+    const r = resaleAgg.get(name);
+    const totalInvoiced = (t?.invoiced ?? 0) + (r?.invoiced ?? 0);
+    const totalAllocatedPaid = (t?.paid ?? 0) + (r?.paid ?? 0);
+    const totalPaymentsReceived = payAgg.get(name) ?? 0;
     const unallocatedCredit = Math.max(0, totalPaymentsReceived - totalAllocatedPaid);
     const outstandingReceivable = Math.max(0, totalInvoiced - totalAllocatedPaid);
-
-    const totalTripsCount = trips.length + resales.length;
-    const unpaidTripsCount = trips.filter(t => (t.client_paid ?? 0) < tripClientFee({ truckCost: t.truck_cost })).length +
-      resales.filter(r => (r.client_paid ?? 0) < r.client_selling_price).length;
 
     return {
       clientName: name,
@@ -141,8 +140,8 @@ router.get('/summary', asyncHandler(async (_req: Request, res: Response) => {
       totalAllocatedPaid,
       outstandingReceivable,
       unallocatedCredit,
-      totalTripsCount,
-      unpaidTripsCount
+      totalTripsCount: (t?.cnt ?? 0) + (r?.cnt ?? 0),
+      unpaidTripsCount: (t?.unpaid ?? 0) + (r?.unpaid ?? 0),
     };
   });
 

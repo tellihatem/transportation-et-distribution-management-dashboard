@@ -130,9 +130,23 @@ function addToSyncQueue(
 /**
  * Process all pending items in the sync queue (called by scheduler)
  */
+let queueRunInFlight = false;
+
 export async function processSyncQueue(): Promise<{ processed: number; failed: number }> {
   const client = getSupabaseClient();
   if (!client) return { processed: 0, failed: 0 };
+
+  // setInterval does not wait for an async callback. Against a slow or
+  // blackholed endpoint one pass can outlive the interval, and overlapping
+  // passes would then hammer the same unclaimed rows. One pass at a time.
+  if (queueRunInFlight) return { processed: 0, failed: 0 };
+  queueRunInFlight = true;
+  try {
+
+  // Rows that have exhausted their retries are dead: never sent again, but
+  // until now re-scanned by every tick forever. Reap them (a fresh edit of
+  // the same record re-queues it with a clean count).
+  db.prepare('DELETE FROM sync_queue WHERE retry_count >= 10').run();
 
   const pending = db.prepare(
     'SELECT * FROM sync_queue WHERE retry_count < 10 ORDER BY created_at ASC LIMIT 50'
@@ -164,6 +178,9 @@ export async function processSyncQueue(): Promise<{ processed: number; failed: n
 
   console.log(`[SYNC] Queue processing complete: ${processed} synced, ${failed} failed`);
   return { processed, failed };
+  } finally {
+    queueRunInFlight = false;
+  }
 }
 
 /**

@@ -887,6 +887,8 @@ export const T = {
     kindExpense: "أعباء ومصاريف",
     cancel: "إلغاء الأمر",
     save: "حفظ وإدراج التعديل",
+    /** Save button while the request is in flight (double-click guard). */
+    savingInFlight: "جارٍ الحفظ...",
 
     /* --- Transport trip fields --- */
     tripId: "رقم سند النقل",

@@ -91,50 +91,48 @@ router.get('/next-id', (0, error_handler_1.asyncHandler)(async (_req, res) => {
  * GET /api/driver-payments/summary — Summary statistics for all drivers
  */
 router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
-    const driverRows = database_1.default.prepare(`
-    SELECT driver_name as name FROM client_trips WHERE driver_name != ''
-    UNION
-    SELECT driver_name as name FROM material_resales WHERE driver_name != ''
-    UNION
-    SELECT driver_name as name FROM driver_payments WHERE driver_name != ''
-  `).all();
-    const driverSummaries = driverRows.map(({ name }) => {
-        // 1. Transport Trips for driver
-        const trips = database_1.default.prepare('SELECT * FROM client_trips WHERE driver_name = ?').all(name);
-        let transportEarned = 0;
-        let transportPaid = 0;
-        trips.forEach(t => {
-            transportEarned += t.driver_cut;
-            transportPaid += (t.driver_paid ?? 0);
-        });
-        // 2. Material Resales for driver
-        const resales = database_1.default.prepare('SELECT * FROM material_resales WHERE driver_name = ?').all(name);
-        let resaleEarned = 0;
-        let resalePaid = 0;
-        // driver_cost is the wage for ONE trip, so a multi-trip delivery earns
-        // that wage once per trip.
-        resales.forEach(r => {
-            resaleEarned += resaleDriverWage(r);
-            resalePaid += (r.driver_paid ?? 0);
-        });
-        const totalEarned = transportEarned + resaleEarned;
-        // 3. Driver Payments recorded
-        const payments = database_1.default.prepare('SELECT * FROM driver_payments WHERE driver_name = ?').all(name);
-        const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
-        const totalAllocatedPaid = transportPaid + resalePaid;
+    // Aggregate per table instead of three full scans per driver — same
+    // rationale as the client summary: this refires on every write and runs on
+    // the Electron main thread.
+    const tripAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT driver_name as name,
+           SUM(driver_cut) as earned,
+           SUM(COALESCE(driver_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(driver_paid, 0) < driver_cut - ${ledgers_1.MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM client_trips WHERE driver_name != '' GROUP BY driver_name
+  `).all())
+        tripAgg.set(r.name, r);
+    const resaleAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT driver_name as name,
+           SUM(${ledgers_1.RESALE_DRIVER_WAGE_SQL}) as earned,
+           SUM(COALESCE(driver_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(driver_paid, 0) < ${ledgers_1.RESALE_DRIVER_WAGE_SQL} - ${ledgers_1.MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM material_resales WHERE driver_name != '' GROUP BY driver_name
+  `).all())
+        resaleAgg.set(r.name, r);
+    const payAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT driver_name as name, SUM(amount) as total
+    FROM driver_payments WHERE driver_name != '' GROUP BY driver_name
+  `).all())
+        payAgg.set(r.name, r.total);
+    const names = new Set([...tripAgg.keys(), ...resaleAgg.keys(), ...payAgg.keys()]);
+    const driverSummaries = [...names].map(name => {
+        const t = tripAgg.get(name);
+        const r = resaleAgg.get(name);
+        const totalEarned = (t?.earned ?? 0) + (r?.earned ?? 0);
+        const totalAllocatedPaid = (t?.paid ?? 0) + (r?.paid ?? 0);
+        const totalPaymentsGiven = payAgg.get(name) ?? 0;
         // Not yet applied to any trip — the figure the drawdown views track.
         const advanceBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-        // Paid beyond everything EARNED — the only part that is money out with no
-        // work behind it, and therefore the only part the profit views deduct.
-        // (advanceBalance would double-count: an unallocated payment against an
-        // earned wage is a bookkeeping gap, not missing money.)
+        // Paid beyond everything EARNED — the only part the profit views deduct.
         const unearnedAdvance = Math.max(0, totalPaymentsGiven - totalEarned);
-        // Work done and not settled. Allocation basis, matching the client and
-        // supplier ledgers — an advance sitting unapplied does not hide it.
+        // Work done and not settled, allocation basis like the other ledgers.
         const outstandingPayable = Math.max(0, totalEarned - totalAllocatedPaid);
-        const totalTripsCount = trips.length + resales.length;
-        const unpaidTripsCount = trips.filter(t => (t.driver_paid ?? 0) < t.driver_cut).length +
-            resales.filter(r => (r.driver_paid ?? 0) < resaleDriverWage(r)).length;
         return {
             driverName: name,
             totalEarned,
@@ -143,8 +141,8 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
             outstandingPayable,
             advanceBalance,
             unearnedAdvance,
-            totalTripsCount,
-            unpaidTripsCount
+            totalTripsCount: (t?.cnt ?? 0) + (r?.cnt ?? 0),
+            unpaidTripsCount: (t?.unpaid ?? 0) + (r?.unpaid ?? 0),
         };
     });
     res.json({ success: true, data: driverSummaries });

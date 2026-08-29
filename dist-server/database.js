@@ -25,6 +25,7 @@ exports.QUARANTINED_FILE = exports.DATABASE_FILE = exports.DB_EPOCH = void 0;
 exports.getDbProvenance = getDbProvenance;
 exports.listOtherDatabaseFiles = listOtherDatabaseFiles;
 exports.runMigrations = runMigrations;
+exports.cachedStmt = cachedStmt;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
@@ -237,4 +238,24 @@ function runMigrations() {
 // NOTE: there is deliberately no seeding function here. Databases start empty
 // and are only ever filled by the operator, by a backup import, or by a cloud
 // restore. Records must never appear on their own.
+/**
+ * Compile-once statement cache.
+ *
+ * better-sqlite3 has no internal cache: every db.prepare() is a fresh
+ * sqlite3_prepare_v2 compile whose native handle lives until V8 collects the
+ * wrapper. The hot ledger paths prepare the same handful of SQL strings
+ * inside per-party loops on every request — and this server shares the
+ * Electron main thread, so compile time is keystroke latency. Statements are
+ * cached by their exact SQL text; better-sqlite3 statements are reusable and
+ * this process is single-threaded, so sharing them is safe.
+ */
+const stmtCache = new Map();
+function cachedStmt(sql) {
+    let stmt = stmtCache.get(sql);
+    if (!stmt) {
+        stmt = db.prepare(sql);
+        stmtCache.set(sql, stmt);
+    }
+    return stmt;
+}
 exports.default = db;

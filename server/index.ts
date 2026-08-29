@@ -285,12 +285,22 @@ export async function stopServer(): Promise<void> {
   closeDatabase();
 }
 
-// Auto-start if run directly
+// Auto-start if run directly — including when Electron forks this file as a
+// utilityProcess. In that case process.parentPort exists, and the parent is
+// waiting to hear which port was bound (or why binding failed) before it
+// loads the window. Plain `node dist-server/index.js` has no parentPort and
+// behaves exactly as before.
 if (typeof require !== 'undefined' && require.main === module) {
-  startServer().catch((error) => {
-    console.error('[SERVER] Unhandled startup error:', error);
-    process.exitCode = 1;
-  });
+  const parentPort = (process as any).parentPort;
+  startServer()
+    .then((port) => {
+      parentPort?.postMessage({ type: 'server-listening', port });
+    })
+    .catch((error) => {
+      console.error('[SERVER] Unhandled startup error:', error);
+      parentPort?.postMessage({ type: 'server-failed', message: String(error?.message || error) });
+      process.exitCode = 1;
+    });
 }
 
 export default app;

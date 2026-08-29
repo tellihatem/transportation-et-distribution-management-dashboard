@@ -2,31 +2,46 @@
  * useTrips — Hook for managing Client Transport Trip data via the API
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ClientTransportTrip, ClientTransportTripInput, TabFilters } from '../types';
 import { fetchTrips, createTrip, updateTrip, deleteTrip } from '../api/client';
+import { useDebouncedValue } from './useDebouncedValue';
 
 export function useTrips(filters: TabFilters) {
   const [trips, setTrips] = useState<ClientTransportTrip[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // One request burst per pause in typing, and never a stale overwrite: the
+  // previous request is aborted and, belt-and-braces, a generation counter
+  // discards any response that still lands out of order.
+  const debouncedSearch = useDebouncedValue(filters.searchQuery, 300);
+  const generation = useRef(0);
+  const inFlight = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
     try {
       setError(null);
+      inFlight.current?.abort();
+      const controller = new AbortController();
+      inFlight.current = controller;
+      const myGeneration = ++generation.current;
+
       const data = await fetchTrips({
-        search: filters.searchQuery || undefined,
+        search: debouncedSearch || undefined,
         dateStart: filters.dateStart || undefined,
         dateEnd: filters.dateEnd || undefined,
-      });
+      }, controller.signal);
+      if (myGeneration !== generation.current) return;
       setTrips(data);
     } catch (err: any) {
+      if (err?.name === 'AbortError') return; // superseded, not an error
       setError(err.message);
       console.error('[useTrips] Fetch error:', err);
     } finally {
       setLoading(false);
     }
-  }, [filters.searchQuery, filters.dateStart, filters.dateEnd]);
+  }, [debouncedSearch, filters.dateStart, filters.dateEnd]);
 
   useEffect(() => {
     load();

@@ -58,13 +58,13 @@ function syncTargetPaid(targetType: 'resale' | 'invoice', targetId: string) {
   if (targetType === 'resale') {
     db.prepare(`
       UPDATE material_resales
-      SET supplier_paid = ?, updated_at = datetime('now')
+      SET supplier_paid = ?, updated_at = datetime('now'), synced_at = NULL
       WHERE id = ?
     `).run(sumRow.total_allocated, targetId);
   } else {
     db.prepare(`
       UPDATE supplier_invoices
-      SET paid = ?, updated_at = datetime('now')
+      SET paid = ?, updated_at = datetime('now'), synced_at = NULL
       WHERE id = ?
     `).run(sumRow.total_allocated, targetId);
   }
@@ -209,58 +209,51 @@ supplierPaymentsRouter.get('/summary', asyncHandler(async (_req: Request, res: R
   // A supplier exists if goods were ever bought from it, money was ever paid
   // to it, or a manual invoice names it — same union trick the driver summary
   // uses, so a supplier holding only a prepayment still appears.
-  const supplierRows = db.prepare(`
-    SELECT origin_factory as name FROM material_resales WHERE origin_factory != ''
-    UNION
-    SELECT supplier_name as name FROM supplier_payments WHERE supplier_name != ''
-    UNION
-    SELECT supplier_name as name FROM supplier_invoices WHERE supplier_name != ''
-  `).all() as { name: string }[];
+  // Aggregate per table instead of three SELECT * per supplier. The lookups
+  // here were already index-backed, but this endpoint still compiled 1+3S
+  // statements per call and refires on every write.
+  const resaleAgg = new Map<string, any>();
+  for (const r of db.prepare(`
+    SELECT origin_factory as name,
+           SUM(${RESALE_SUPPLIER_COST_SQL}) as owed,
+           SUM(COALESCE(supplier_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(supplier_paid, 0) < ${RESALE_SUPPLIER_COST_SQL} THEN 1 ELSE 0 END) as unpaid
+    FROM material_resales WHERE origin_factory != '' GROUP BY origin_factory
+  `).all() as any[]) resaleAgg.set(r.name, r);
 
-  const summaries = supplierRows.map(({ name }) => {
-    // 1. Goods bought from this supplier via resales
-    const resales = db.prepare('SELECT * FROM material_resales WHERE origin_factory = ?').all(name) as any[];
-    let resaleOwed = 0;
-    let resalePaid = 0;
-    resales.forEach(r => {
-      resaleOwed += resaleSupplierCost(r);
-      resalePaid += (r.supplier_paid ?? 0);
-    });
+  const invoiceAgg = new Map<string, any>();
+  for (const r of db.prepare(`
+    SELECT supplier_name as name,
+           SUM(amount) as owed,
+           SUM(COALESCE(paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(paid, 0) < amount THEN 1 ELSE 0 END) as unpaid
+    FROM supplier_invoices WHERE supplier_name != '' GROUP BY supplier_name
+  `).all() as any[]) invoiceAgg.set(r.name, r);
 
-    // 2. Manual invoices
-    const invoices = db.prepare('SELECT * FROM supplier_invoices WHERE supplier_name = ?').all(name) as any[];
-    let invoiceOwed = 0;
-    let invoicePaid = 0;
-    invoices.forEach(i => {
-      invoiceOwed += i.amount;
-      invoicePaid += (i.paid ?? 0);
-    });
+  const payAgg = new Map<string, number>();
+  for (const r of db.prepare(`
+    SELECT supplier_name as name, SUM(amount) as total
+    FROM supplier_payments WHERE supplier_name != '' GROUP BY supplier_name
+  `).all() as any[]) payAgg.set(r.name, r.total);
 
-    // 3. Payments made to this supplier
-    const payments = db.prepare('SELECT * FROM supplier_payments WHERE supplier_name = ?').all(name) as any[];
-    const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
+  const names = new Set<string>([...resaleAgg.keys(), ...invoiceAgg.keys(), ...payAgg.keys()]);
 
-    const totalOwed = resaleOwed + invoiceOwed;
-    const totalAllocatedPaid = resalePaid + invoicePaid;
+  const summaries = [...names].map(name => {
+    const r = resaleAgg.get(name);
+    const i = invoiceAgg.get(name);
+    const totalOwed = (r?.owed ?? 0) + (i?.owed ?? 0);
+    const totalAllocatedPaid = (r?.paid ?? 0) + (i?.paid ?? 0);
+    const totalPaymentsGiven = payAgg.get(name) ?? 0;
 
     // DRAWDOWN semantics: an advance is money sitting with the supplier until
-    // the owner deducts it against a specific shipment. So the credit only
-    // falls when he actually makes that deduction, and a shipment counts as
-    // debt until it has been deducted for. A supplier can therefore show both
-    // at once — credit still on account, and goods received but not yet drawn
-    // down — which is the true position, not a contradiction.
+    // the owner deducts it against a specific shipment, so debt and credit
+    // can legitimately show at once — that is the true position.
     const outstandingDebt = Math.max(0, totalOwed - totalAllocatedPaid);
     const prepaidBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-    // Paid beyond everything OWED — money out with no goods behind it, and
-    // therefore what the profit views deduct. prepaidBalance would
-    // double-count: once a delivery exists its cost is already inside the
-    // resale profit, whether or not the owner has drawn the advance down yet.
+    // Paid beyond everything OWED — the only part the profit views deduct.
     const unmatchedPrepaid = Math.max(0, totalPaymentsGiven - totalOwed);
-
-    const shipmentsCount = resales.length + invoices.length;
-    const unpaidCount =
-      resales.filter(r => (r.supplier_paid ?? 0) < resaleSupplierCost(r)).length +
-      invoices.filter(i => (i.paid ?? 0) < i.amount).length;
 
     return {
       supplierName: name,
@@ -270,8 +263,8 @@ supplierPaymentsRouter.get('/summary', asyncHandler(async (_req: Request, res: R
       outstandingDebt,
       prepaidBalance,
       unmatchedPrepaid,
-      shipmentsCount,
-      unpaidCount
+      shipmentsCount: (r?.cnt ?? 0) + (i?.cnt ?? 0),
+      unpaidCount: (r?.unpaid ?? 0) + (i?.unpaid ?? 0),
     };
   });
 

@@ -82,21 +82,23 @@ export function DriverAccountsTab({
   });
 
   // Open Payout Modal for a specific driver
-  const openPayoutForDriver = async (driverName: string) => {
-    try {
-      const nextId = await fetchNextDriverPaymentId();
-      setPayoutForm(prev => ({
-        ...prev,
-        id: nextId,
-        driverName,
-        date: new Date().toISOString().split('T')[0],
-        amount: 50000,
-        allocationMode: 'auto'
-      }));
-      setIsPaymentModalOpen(true);
-    } catch (e) {
-      console.error('Failed to get next driver payout ID:', e);
-    }
+  const openPayoutForDriver = (driverName: string) => {
+    // The dialog opens IMMEDIATELY; the receipt number fills in when the
+    // server answers (submitting with it still empty is fine — the server
+    // generates one). Awaiting it before opening made the button look dead
+    // whenever the server was busy.
+    setPayoutForm(prev => ({
+      ...prev,
+      id: '',
+      driverName,
+      date: new Date().toISOString().split('T')[0],
+      amount: 50000,
+      allocationMode: 'auto'
+    }));
+    setIsPaymentModalOpen(true);
+    fetchNextDriverPaymentId()
+      .then(nextId => setPayoutForm(prev => (prev.id === '' ? { ...prev, id: nextId } : prev)))
+      .catch(e => console.error('Failed to get next driver payout ID:', e));
   };
 
   // Open Statement Modal for a driver
@@ -219,11 +221,17 @@ export function DriverAccountsTab({
     const originalTitle = document.title;
     const party = statementData?.driverName;
     if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
+    let restored = false;
     const restoreTitle = () => {
+      if (restored) return;
+      restored = true;
       document.title = originalTitle;
-      window.removeEventListener('afterprint', restoreTitle);
     };
-    window.addEventListener('afterprint', restoreTitle);
+    // Electron does not always deliver afterprint (a dismissed dialog on some
+    // versions) — without the fallback each print click would leak a listener
+    // and later restore a stale title.
+    window.addEventListener('afterprint', restoreTitle, { once: true });
+    setTimeout(restoreTitle, 120000);
     window.print();
   };
 

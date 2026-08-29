@@ -60,14 +60,14 @@ function syncTargetPaid(targetType, targetId) {
     if (targetType === 'resale') {
         database_1.default.prepare(`
       UPDATE material_resales
-      SET supplier_paid = ?, updated_at = datetime('now')
+      SET supplier_paid = ?, updated_at = datetime('now'), synced_at = NULL
       WHERE id = ?
     `).run(sumRow.total_allocated, targetId);
     }
     else {
         database_1.default.prepare(`
       UPDATE supplier_invoices
-      SET paid = ?, updated_at = datetime('now')
+      SET paid = ?, updated_at = datetime('now'), synced_at = NULL
       WHERE id = ?
     `).run(sumRow.total_allocated, targetId);
     }
@@ -188,51 +188,49 @@ exports.supplierPaymentsRouter.get('/summary', (0, error_handler_1.asyncHandler)
     // A supplier exists if goods were ever bought from it, money was ever paid
     // to it, or a manual invoice names it — same union trick the driver summary
     // uses, so a supplier holding only a prepayment still appears.
-    const supplierRows = database_1.default.prepare(`
-    SELECT origin_factory as name FROM material_resales WHERE origin_factory != ''
-    UNION
-    SELECT supplier_name as name FROM supplier_payments WHERE supplier_name != ''
-    UNION
-    SELECT supplier_name as name FROM supplier_invoices WHERE supplier_name != ''
-  `).all();
-    const summaries = supplierRows.map(({ name }) => {
-        // 1. Goods bought from this supplier via resales
-        const resales = database_1.default.prepare('SELECT * FROM material_resales WHERE origin_factory = ?').all(name);
-        let resaleOwed = 0;
-        let resalePaid = 0;
-        resales.forEach(r => {
-            resaleOwed += resaleSupplierCost(r);
-            resalePaid += (r.supplier_paid ?? 0);
-        });
-        // 2. Manual invoices
-        const invoices = database_1.default.prepare('SELECT * FROM supplier_invoices WHERE supplier_name = ?').all(name);
-        let invoiceOwed = 0;
-        let invoicePaid = 0;
-        invoices.forEach(i => {
-            invoiceOwed += i.amount;
-            invoicePaid += (i.paid ?? 0);
-        });
-        // 3. Payments made to this supplier
-        const payments = database_1.default.prepare('SELECT * FROM supplier_payments WHERE supplier_name = ?').all(name);
-        const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
-        const totalOwed = resaleOwed + invoiceOwed;
-        const totalAllocatedPaid = resalePaid + invoicePaid;
+    // Aggregate per table instead of three SELECT * per supplier. The lookups
+    // here were already index-backed, but this endpoint still compiled 1+3S
+    // statements per call and refires on every write.
+    const resaleAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT origin_factory as name,
+           SUM(${RESALE_SUPPLIER_COST_SQL}) as owed,
+           SUM(COALESCE(supplier_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(supplier_paid, 0) < ${RESALE_SUPPLIER_COST_SQL} THEN 1 ELSE 0 END) as unpaid
+    FROM material_resales WHERE origin_factory != '' GROUP BY origin_factory
+  `).all())
+        resaleAgg.set(r.name, r);
+    const invoiceAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT supplier_name as name,
+           SUM(amount) as owed,
+           SUM(COALESCE(paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(paid, 0) < amount THEN 1 ELSE 0 END) as unpaid
+    FROM supplier_invoices WHERE supplier_name != '' GROUP BY supplier_name
+  `).all())
+        invoiceAgg.set(r.name, r);
+    const payAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT supplier_name as name, SUM(amount) as total
+    FROM supplier_payments WHERE supplier_name != '' GROUP BY supplier_name
+  `).all())
+        payAgg.set(r.name, r.total);
+    const names = new Set([...resaleAgg.keys(), ...invoiceAgg.keys(), ...payAgg.keys()]);
+    const summaries = [...names].map(name => {
+        const r = resaleAgg.get(name);
+        const i = invoiceAgg.get(name);
+        const totalOwed = (r?.owed ?? 0) + (i?.owed ?? 0);
+        const totalAllocatedPaid = (r?.paid ?? 0) + (i?.paid ?? 0);
+        const totalPaymentsGiven = payAgg.get(name) ?? 0;
         // DRAWDOWN semantics: an advance is money sitting with the supplier until
-        // the owner deducts it against a specific shipment. So the credit only
-        // falls when he actually makes that deduction, and a shipment counts as
-        // debt until it has been deducted for. A supplier can therefore show both
-        // at once — credit still on account, and goods received but not yet drawn
-        // down — which is the true position, not a contradiction.
+        // the owner deducts it against a specific shipment, so debt and credit
+        // can legitimately show at once — that is the true position.
         const outstandingDebt = Math.max(0, totalOwed - totalAllocatedPaid);
         const prepaidBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-        // Paid beyond everything OWED — money out with no goods behind it, and
-        // therefore what the profit views deduct. prepaidBalance would
-        // double-count: once a delivery exists its cost is already inside the
-        // resale profit, whether or not the owner has drawn the advance down yet.
+        // Paid beyond everything OWED — the only part the profit views deduct.
         const unmatchedPrepaid = Math.max(0, totalPaymentsGiven - totalOwed);
-        const shipmentsCount = resales.length + invoices.length;
-        const unpaidCount = resales.filter(r => (r.supplier_paid ?? 0) < resaleSupplierCost(r)).length +
-            invoices.filter(i => (i.paid ?? 0) < i.amount).length;
         return {
             supplierName: name,
             totalOwed,
@@ -241,8 +239,8 @@ exports.supplierPaymentsRouter.get('/summary', (0, error_handler_1.asyncHandler)
             outstandingDebt,
             prepaidBalance,
             unmatchedPrepaid,
-            shipmentsCount,
-            unpaidCount
+            shipmentsCount: (r?.cnt ?? 0) + (i?.cnt ?? 0),
+            unpaidCount: (r?.unpaid ?? 0) + (i?.unpaid ?? 0),
         };
     });
     res.json({ success: true, data: summaries });

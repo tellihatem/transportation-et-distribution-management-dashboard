@@ -122,38 +122,42 @@ export function SupplierAccountsTab({
     notes: '',
   });
 
-  const openPaymentForSupplier = async (supplierName: string) => {
-    try {
-      const nextId = await fetchNextSupplierPaymentId();
-      setPaymentForm(prev => ({
-        ...prev,
-        id: nextId,
-        supplierName,
-        date: new Date().toISOString().split('T')[0],
-        amount: 100000,
-        paymentType: T.supplierAccounts.paymentTypeRepay,
-        allocationMode: 'auto'
-      }));
-      setIsPaymentModalOpen(true);
-    } catch (e) {
-      console.error('Failed to get next supplier payment ID:', e);
-    }
+  const openPaymentForSupplier = (supplierName: string) => {
+    // The dialog opens IMMEDIATELY; the receipt number fills in when the
+    // server answers (submitting with it still empty is fine — the server
+    // generates one). Awaiting it before opening made the button look dead
+    // whenever the server was busy.
+    setPaymentForm(prev => ({
+      ...prev,
+      id: '',
+      supplierName,
+      date: new Date().toISOString().split('T')[0],
+      amount: 100000,
+      paymentType: T.supplierAccounts.paymentTypeRepay,
+      allocationMode: 'auto'
+    }));
+    setIsPaymentModalOpen(true);
+    fetchNextSupplierPaymentId()
+      .then(nextId => setPaymentForm(prev => (prev.id === '' ? { ...prev, id: nextId } : prev)))
+      .catch(e => console.error('Failed to get next supplier payment ID:', e));
   };
 
-  const openInvoiceForSupplier = async (supplierName: string) => {
-    try {
-      const nextId = await fetchNextSupplierInvoiceId();
-      setInvoiceForm({
-        id: nextId,
-        date: new Date().toISOString().split('T')[0],
-        supplierName,
-        amount: 50000,
-        notes: '',
-      });
-      setIsInvoiceModalOpen(true);
-    } catch (e) {
-      console.error('Failed to get next supplier invoice ID:', e);
-    }
+  const openInvoiceForSupplier = (supplierName: string) => {
+    // The dialog opens IMMEDIATELY; the receipt number fills in when the
+    // server answers (submitting with it still empty is fine — the server
+    // generates one). Awaiting it before opening made the button look dead
+    // whenever the server was busy.
+    setInvoiceForm({
+      id: '',
+      date: new Date().toISOString().split('T')[0],
+      supplierName,
+      amount: 50000,
+      notes: '',
+    });
+    setIsInvoiceModalOpen(true);
+    fetchNextSupplierInvoiceId()
+      .then(nextId => setInvoiceForm(prev => (prev.id === '' ? { ...prev, id: nextId } : prev)))
+      .catch(e => console.error('Failed to get next supplier invoice ID:', e));
   };
 
   /**
@@ -383,11 +387,17 @@ export function SupplierAccountsTab({
     const originalTitle = document.title;
     const party = statementData?.supplierName;
     if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
+    let restored = false;
     const restoreTitle = () => {
+      if (restored) return;
+      restored = true;
       document.title = originalTitle;
-      window.removeEventListener('afterprint', restoreTitle);
     };
-    window.addEventListener('afterprint', restoreTitle);
+    // Electron does not always deliver afterprint (a dismissed dialog on some
+    // versions) — without the fallback each print click would leak a listener
+    // and later restore a stale title.
+    window.addEventListener('afterprint', restoreTitle, { once: true });
+    setTimeout(restoreTitle, 120000);
     window.print();
   };
 

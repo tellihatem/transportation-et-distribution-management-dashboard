@@ -13,7 +13,7 @@
  * down per delivery by hand, from the supplier tab. See server/routes/suppliers.ts.
  */
 
-import db from './database';
+import db, { cachedStmt } from './database';
 import { TRIP_CLIENT_FEE_SQL, tripClientFee } from './trip-math';
 
 /** Per-trip driver wage: the resale table stores it per trip, not per deal. */
@@ -32,15 +32,15 @@ export const MONEY_EPSILON = 0.005;
 /** Recalculate a trip/resale's client_paid cache from the allocation rows. */
 export function syncTripClientPaid(tripType: TripType, tripId: string) {
   const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-  const sumRow = db.prepare(`
+  const sumRow = cachedStmt(`
     SELECT COALESCE(SUM(amount), 0) as total_allocated
     FROM client_payment_allocations
     WHERE trip_type = ? AND trip_id = ?
   `).get(tripType, tripId) as { total_allocated: number };
 
-  db.prepare(`
+  cachedStmt(`
     UPDATE ${table}
-    SET client_paid = ?, updated_at = datetime('now')
+    SET client_paid = ?, updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
   `).run(sumRow.total_allocated, tripId);
 }
@@ -48,29 +48,29 @@ export function syncTripClientPaid(tripType: TripType, tripId: string) {
 /** Recalculate a trip/resale's driver_paid cache from the allocation rows. */
 export function syncTripDriverPaid(tripType: TripType, tripId: string) {
   const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-  const sumRow = db.prepare(`
+  const sumRow = cachedStmt(`
     SELECT COALESCE(SUM(amount), 0) as total_allocated
     FROM driver_payment_allocations
     WHERE trip_type = ? AND trip_id = ?
   `).get(tripType, tripId) as { total_allocated: number };
 
-  db.prepare(`
+  cachedStmt(`
     UPDATE ${table}
-    SET driver_paid = ?, updated_at = datetime('now')
+    SET driver_paid = ?, updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
   `).run(sumRow.total_allocated, tripId);
 }
 
 /** Work this client still owes money on, oldest first. */
 function unpaidClientWork(clientName: string): any[] {
-  const trips = db.prepare(`
+  const trips = cachedStmt(`
     SELECT id, 'transport' as trip_type, date, ${TRIP_CLIENT_FEE_SQL} as total_fee, client_paid as paid
     FROM client_trips
     WHERE client_name = ? AND client_paid < ${TRIP_CLIENT_FEE_SQL} - ${MONEY_EPSILON}
     ORDER BY date ASC
   `).all(clientName) as any[];
 
-  const resales = db.prepare(`
+  const resales = cachedStmt(`
     SELECT id, 'resale' as trip_type, date, client_selling_price as total_fee, client_paid as paid
     FROM material_resales
     WHERE end_client = ? AND client_paid < client_selling_price - ${MONEY_EPSILON}
@@ -82,14 +82,14 @@ function unpaidClientWork(clientName: string): any[] {
 
 /** Work this driver is still owed wages on, oldest first. */
 function unpaidDriverWork(driverName: string): any[] {
-  const trips = db.prepare(`
+  const trips = cachedStmt(`
     SELECT id, 'transport' as trip_type, date, driver_cut as total_fee, driver_paid as paid
     FROM client_trips
     WHERE driver_name = ? AND driver_paid < driver_cut - ${MONEY_EPSILON}
     ORDER BY date ASC
   `).all(driverName) as any[];
 
-  const resales = db.prepare(`
+  const resales = cachedStmt(`
     SELECT id, 'resale' as trip_type, date, ${RESALE_DRIVER_WAGE_SQL} as total_fee, driver_paid as paid
     FROM material_resales
     WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL} - ${MONEY_EPSILON}
@@ -110,7 +110,7 @@ export function allocateClientPayment(paymentId: string, clientName: string, amo
     const due = item.total_fee - (item.paid ?? 0);
     if (due <= MONEY_EPSILON) continue;
     const allocAmt = Math.min(due, remaining);
-    db.prepare(`
+    cachedStmt(`
       INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
       VALUES (?, ?, ?, ?)
     `).run(paymentId, item.trip_type, item.id, allocAmt);
@@ -127,7 +127,7 @@ export function allocateDriverPayment(paymentId: string, driverName: string, amo
     const due = item.total_fee - (item.paid ?? 0);
     if (due <= MONEY_EPSILON) continue;
     const allocAmt = Math.min(due, remaining);
-    db.prepare(`
+    cachedStmt(`
       INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
       VALUES (?, ?, ?, ?)
     `).run(paymentId, item.trip_type, item.id, allocAmt);
@@ -139,7 +139,7 @@ export function allocateDriverPayment(paymentId: string, driverName: string, amo
 
 /** The part of each payment that is not yet applied to any work, oldest first. */
 function unappliedPayments(table: string, allocTable: string, nameColumn: string, name: string): any[] {
-  return db.prepare(`
+  return cachedStmt(`
     SELECT p.id, p.amount - COALESCE((
       SELECT SUM(a.amount) FROM ${allocTable} a WHERE a.payment_id = p.id
     ), 0) AS unapplied
@@ -179,7 +179,7 @@ export function applyDriverAdvance(driverName: string) {
  */
 export function releaseStaleAllocations(tripType: TripType, tripId: string) {
   const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(tripId) as any;
+  const row = cachedStmt(`SELECT * FROM ${table} WHERE id = ?`).get(tripId) as any;
   if (!row) return;
 
   const clientFee = tripType === 'transport'
@@ -189,32 +189,32 @@ export function releaseStaleAllocations(tripType: TripType, tripId: string) {
     ? (row.driver_cut ?? 0)
     : Math.max(1, row.trip_count ?? 1) * (row.driver_cost ?? 0);
 
-  const clientAllocs = db.prepare(`
+  const clientAllocs = cachedStmt(`
     SELECT a.id, p.client_name FROM client_payment_allocations a
     JOIN client_payments p ON p.id = a.payment_id
     WHERE a.trip_type = ? AND a.trip_id = ?
   `).all(tripType, tripId) as any[];
   const currentClient = tripType === 'transport' ? row.client_name : row.end_client;
   const clientTotal = clientAllocs.length
-    ? (db.prepare(`SELECT COALESCE(SUM(amount), 0) as t FROM client_payment_allocations WHERE trip_type = ? AND trip_id = ?`)
+    ? (cachedStmt(`SELECT COALESCE(SUM(amount), 0) as t FROM client_payment_allocations WHERE trip_type = ? AND trip_id = ?`)
         .get(tripType, tripId) as any).t
     : 0;
   if (clientAllocs.some(a => a.client_name !== currentClient) || clientTotal > clientFee) {
-    db.prepare('DELETE FROM client_payment_allocations WHERE trip_type = ? AND trip_id = ?').run(tripType, tripId);
+    cachedStmt('DELETE FROM client_payment_allocations WHERE trip_type = ? AND trip_id = ?').run(tripType, tripId);
     syncTripClientPaid(tripType, tripId);
   }
 
-  const driverAllocs = db.prepare(`
+  const driverAllocs = cachedStmt(`
     SELECT a.id, p.driver_name FROM driver_payment_allocations a
     JOIN driver_payments p ON p.id = a.payment_id
     WHERE a.trip_type = ? AND a.trip_id = ?
   `).all(tripType, tripId) as any[];
   const driverTotal = driverAllocs.length
-    ? (db.prepare(`SELECT COALESCE(SUM(amount), 0) as t FROM driver_payment_allocations WHERE trip_type = ? AND trip_id = ?`)
+    ? (cachedStmt(`SELECT COALESCE(SUM(amount), 0) as t FROM driver_payment_allocations WHERE trip_type = ? AND trip_id = ?`)
         .get(tripType, tripId) as any).t
     : 0;
   if (driverAllocs.some(a => a.driver_name !== row.driver_name) || driverTotal > driverFee) {
-    db.prepare('DELETE FROM driver_payment_allocations WHERE trip_type = ? AND trip_id = ?').run(tripType, tripId);
+    cachedStmt('DELETE FROM driver_payment_allocations WHERE trip_type = ? AND trip_id = ?').run(tripType, tripId);
     syncTripDriverPaid(tripType, tripId);
   }
 }
@@ -251,7 +251,7 @@ export function manualAllocationError(
   amount: number
 ): string | null {
   const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
-  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(tripId) as any;
+  const row = cachedStmt(`SELECT * FROM ${table} WHERE id = ?`).get(tripId) as any;
   if (!row) return `target ${tripId} does not exist`;
 
   if (side === 'client') {
