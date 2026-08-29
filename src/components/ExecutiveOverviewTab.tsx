@@ -36,7 +36,7 @@ import {
   ComposedChart,
   Line
 } from 'recharts';
-import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary } from '../types';
+import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary, SupplierSummary } from '../types';
 import { T } from '../strings';
 import type { ChartTheme } from '../chart-theme';
 import { tripClientFee } from '../../server/trip-math';
@@ -48,6 +48,7 @@ interface ExecutiveOverviewTabProps {
   expenses: OtherExpense[];
   clientSummaries: ClientSummary[];
   driverSummaries: DriverSummary[];
+  supplierSummaries: SupplierSummary[];
   onNavigateTab: (tab: 'transport' | 'resale' | 'expenses' | 'clients' | 'drivers' | 'suppliers') => void;
   /** Chart colours for the active theme — see src/chart-theme.ts. */
   charts: ChartTheme;
@@ -61,6 +62,7 @@ export function ExecutiveOverviewTab({
   expenses,
   clientSummaries,
   driverSummaries,
+  supplierSummaries,
   onNavigateTab,
   charts
 }: ExecutiveOverviewTabProps) {
@@ -121,10 +123,17 @@ export function ExecutiveOverviewTab({
     const driverOutstandingPayable = driverSummaries.reduce((sum, d) => sum + d.outstandingPayable, 0);
     const driverAdvances = driverSummaries.reduce((sum, d) => sum + d.advanceBalance, 0);
 
+    // 6. Supplier advances still sitting with the factories (money out, no
+    // goods received against it yet). Like driver advances, these reduce the
+    // profit until deliveries consume them.
+    const supplierPrepaid = supplierSummaries.reduce((sum, sp) => sum + sp.prepaidBalance, 0);
+
     // Overall Combined Figures
     const grossInvoicedTurnover = transportInvoiced + resaleInvoiced;
     const grossDirectProfit = transportCompanyProfit + resaleTrueProfit;
-    const netOperatingProfit = grossDirectProfit - totalOperationalBurdens;
+    // Advances out are deducted for the same reason as on the formula deck:
+    // that money has left the company and nothing has earned it back yet.
+    const netOperatingProfit = grossDirectProfit - totalOperationalBurdens - driverAdvances - supplierPrepaid;
 
     // Margin %
     const netProfitMarginPercent = grossInvoicedTurnover > 0 ? (netOperatingProfit / grossInvoicedTurnover) * 100 : 0;
@@ -139,6 +148,7 @@ export function ExecutiveOverviewTab({
       driverPayoutsGiven,
       driverOutstandingPayable,
       driverAdvances,
+      supplierPrepaid,
 
       totalOperationalBurdens,
       grossDirectProfit,
@@ -149,7 +159,7 @@ export function ExecutiveOverviewTab({
       resaleTons,
       totalTons: transportTons + resaleTons
     };
-  }, [trips, resales, expenses, clientSummaries, driverSummaries]);
+  }, [trips, resales, expenses, clientSummaries, driverSummaries, supplierSummaries]);
 
   // Chart data: Monthly Cashflow comparison
   const cashflowChartData = useMemo(() => {

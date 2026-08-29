@@ -707,6 +707,10 @@ export const T = {
     transportProfit: "أرباح رحلات نقل العملاء",
     resaleProfit: "أرباح بيع وتوصيل المواد",
     fleetExpenses: "مصاريف الأسطول المدفوعة",
+    /** Money handed out that no work has earned back yet. Deducted from the
+     *  headline profit, and returns to it as trips/deliveries consume it. */
+    driverAdvancesOut: "سلف السائقين غير المستردة",
+    supplierPrepaidOut: "دفعات مسبقة لدى الموردين",
     netProfit: "صافي ربح الشركة",
     /** The four cash-position boxes underneath the formula. */
     cashCollected: "المحصّل من العملاء",

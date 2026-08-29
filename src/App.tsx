@@ -378,7 +378,20 @@ export default function App() {
   // transport + resale, minus approved operating expenses. This is what the
   // business made on paper — it is NOT cash in hand, because a trip counts as
   // soon as it is invoiced whether or not the client has paid.
-  const masterNetProfit = (tab1Stats.netMargin + tab2Stats.totalTrueProfit) - tab3Stats.totalOverhead;
+  // Money the company has handed out that no work has earned back yet: a
+  // driver's سلفة beyond his wages, and factory advances beyond goods
+  // received. It has left the pocket, so the headline profit drops by it —
+  // and comes back on its own as the work arrives, because the deduction here
+  // falls to zero at the same moment the wage or goods cost starts being
+  // counted inside that work's own profit.
+  const driverAdvancesOut = driverSummaries.reduce((sum, d) => sum + d.advanceBalance, 0);
+  const supplierPrepaidOut = supplierSummaries.reduce((sum, sup) => sum + sup.prepaidBalance, 0);
+
+  const masterNetProfit =
+    (tab1Stats.netMargin + tab2Stats.totalTrueProfit)
+    - tab3Stats.totalOverhead
+    - driverAdvancesOut
+    - supplierPrepaidOut;
 
   // Actual cash position, taken from the client/driver ledgers (the same
   // all-time summaries the Client/Driver Accounts tabs use). This is
@@ -1050,6 +1063,16 @@ export default function App() {
                     <span className="text-[10px] text-slate-500">{T.master.fleetExpenses}</span>
                     <span className="text-rose-400 font-bold font-mono">-{tab3Stats.totalOverhead.toLocaleString()} {T.common.currency}</span>
                   </div>
+                  <span className="text-slate-600 font-bold text-lg">-</span>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-500">{T.master.driverAdvancesOut}</span>
+                    <span className="text-rose-400 font-bold font-mono">{driverAdvancesOut > 0 ? `-${driverAdvancesOut.toLocaleString()}` : "0"} {T.common.currency}</span>
+                  </div>
+                  <span className="text-slate-600 font-bold text-lg">-</span>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-500">{T.master.supplierPrepaidOut}</span>
+                    <span className="text-rose-400 font-bold font-mono">{supplierPrepaidOut > 0 ? `-${supplierPrepaidOut.toLocaleString()}` : "0"} {T.common.currency}</span>
+                  </div>
                   <span className="text-slate-500 font-bold text-lg">=</span>
                   <div className="bg-slate-800/40 px-3 py-1 rounded border border-slate-700 flex flex-col">
                     <span className="text-[10px] text-cyan-400 font-bold">{T.master.netProfit}</span>
@@ -1263,6 +1286,7 @@ export default function App() {
                   expenses={expenses}
                   clientSummaries={clientSummaries}
                   driverSummaries={driverSummaries}
+                  supplierSummaries={supplierSummaries}
                   onNavigateTab={tab => setActiveTab(tab)}
                   charts={charts}
                 />
