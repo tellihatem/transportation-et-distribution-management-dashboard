@@ -8,6 +8,7 @@ import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
 import { reconcileWork } from '../ledgers';
+import { tripClientFee, tripCompanyProfit, firstNegativeMoneyField } from '../trip-math';
 
 const router = Router();
 
@@ -78,10 +79,13 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
   let totalTons = 0;
 
   rows.forEach((row: any) => {
-    const tripFee = row.truck_cost + row.driver_cut + row.company_profit;
+    const tripFee = tripClientFee({ truckCost: row.truck_cost });
     grossRevenue += tripFee;
     driverPayout += row.driver_cut;
-    netMargin += row.company_profit;
+    // Recomputed, not read from the stored column: rows that arrived by
+    // backup import or cloud restore may carry a stale company_profit, and
+    // these three figures must always reconcile (revenue = payout + margin).
+    netMargin += tripCompanyProfit({ truckCost: row.truck_cost, driverCut: row.driver_cut });
     totalTons += row.total_tonnage;
   });
 
@@ -118,6 +122,15 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   if (!id || !date || !clientName) {
     throw createApiError('Missing required fields: id, date, clientName', 400, 'VALIDATION_ERROR');
   }
+  // Every trip must name its driver: the wage reduces profit, so without a
+  // name it would be a cost owed to nobody, invisible to every ledger.
+  if (!driverName || !String(driverName).trim()) {
+    throw createApiError('Missing required field: driverName', 400, 'VALIDATION_ERROR');
+  }
+  const negative = firstNegativeMoneyField({ truckCost, driverCut, totalTonnage });
+  if (negative) {
+    throw createApiError(`Field ${negative} must not be negative`, 400, 'VALIDATION_ERROR');
+  }
 
   // Check for duplicate ID
   const existing = db.prepare('SELECT id FROM client_trips WHERE id = ?').get(id);
@@ -125,10 +138,15 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     throw createApiError('Trip ID already exists', 409, 'DUPLICATE_ID');
   }
 
+  // The hire is the client's price and the wage comes out of it, so the
+  // profit is computed here rather than accepted from the caller — no screen
+  // can post a figure that does not follow from the other two.
+  const profit = tripCompanyProfit({ truckCost: truckCost || 0, driverCut: driverCut || 0 });
+
   db.prepare(`
     INSERT INTO client_trips (id, date, client_name, origin_factory, destination, material_type, total_tonnage, quantity_unit, truck_cost, driver_cut, company_profit, driver_name)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, quantityUnit || 'طن', truckCost || 0, driverCut || 0, companyProfit || 0, driverName || '');
+  `).run(id, date, clientName, originFactory || '', destination || '', materialType || '', totalTonnage || 0, quantityUnit || 'طن', truckCost || 0, driverCut || 0, profit, driverName || '');
 
   reconcileWork({ tripType: 'transport', tripId: id, clientNames: [clientName], driverNames: [driverName] });
 
@@ -147,8 +165,19 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id) as any;
   if (!existing) throw createApiError('Trip not found', 404, 'NOT_FOUND');
 
-  const { date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, companyProfit, driverName } = req.body;
+  const { date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, driverName } = req.body;
 
+  if (!driverName || !String(driverName).trim()) {
+    throw createApiError('Missing required field: driverName', 400, 'VALIDATION_ERROR');
+  }
+  const negativePut = firstNegativeMoneyField({ truckCost, driverCut, totalTonnage });
+  if (negativePut) {
+    throw createApiError(`Field ${negativePut} must not be negative`, 400, 'VALIDATION_ERROR');
+  }
+
+  // One transaction: the row update and the ledger reconciliation stand or
+  // fall together, like the DELETE path already does.
+  const updateTx = db.transaction(() => {
   db.prepare(`
     UPDATE client_trips SET
       date = ?, client_name = ?, origin_factory = ?, destination = ?,
@@ -156,7 +185,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
       company_profit = ?, driver_name = ?,
       updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit || 'طن', truckCost, driverCut, companyProfit, driverName || '', req.params.id);
+  `).run(date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit || 'طن', truckCost, driverCut, tripCompanyProfit({ truckCost, driverCut }), driverName || '', req.params.id);
 
   // Both the old and new parties are reconciled: a trip moved to another
   // client hands its money back to the first one as credit.
@@ -166,6 +195,8 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     clientNames: [clientName, existing.client_name],
     driverNames: [driverName, existing.driver_name],
   });
+  });
+  updateTx();
 
   const updated = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
   queueSync('client_trips', req.params.id, 'upsert', updated);

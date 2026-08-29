@@ -9,28 +9,38 @@
  * Deliberately pure: no imports, no I/O, no rounding. Money keeps its exact
  * value all the way through.
  *
+ * Transport follows the same rule as a plain transport trip (server/trip-math.ts):
+ * تأجير الشاحنة is the whole charge for a trip, أجرة السائق is paid out of it,
+ * and the margin is the difference rather than a figure anyone types.
+ *
  * The model, with the worked example (1,500 buy / 4,500 sell × 40 units,
- * one trip of 18,000 + 5,000 + 8,000):
+ * one trip hired at 31,000 with a 5,000 driver wage):
  *
  *   Goods
  *     totalBuyCost       = factoryPurchasePrice × quantity      60,000
  *     totalSellRevenue   = productUnitPrice     × quantity     180,000
  *     grossProductProfit = totalSellRevenue - totalBuyCost     120,000
  *
- *   Transport (all three figures are PER TRIP)
- *     costPerTrip        = truck + driver + visible margin       31,000
+ *   Transport (both figures are PER TRIP)
+ *     costPerTrip        = truckCost, the hire, whole            31,000
+ *     marginPerTrip      = truckCost - driverCost                26,000
  *     transportTotal     = tripCount × costPerTrip               31,000
  *
  *   Profit
- *     hiddenProfit       = grossProductProfit - transportTotal   89,000
- *     netRealProfit      = hiddenProfit + tripCount × margin     97,000
+ *     netRealProfit      = grossProductProfit
+ *                          + tripCount × marginPerTrip          146,000
  *
  *   Invoice
  *     invoiceTotal       = totalSellRevenue + transportTotal    211,000
  *
- * netRealProfit is equivalently grossProductProfit − tripCount × (truck +
- * driver): the visible margin added back is the part of the transport charge
- * that is profit rather than cost. Both readings agree at any trip count.
+ * Transport is NOT a deduction from profit: the client pays the transport
+ * charge on top of the goods, so each trip's hire is revenue, its wage the
+ * only cost, and the margin between them adds to the goods profit. Written
+ * out: netRealProfit = invoiceTotal − totalBuyCost − tripCount × driverCost —
+ * everything the client pays, less the goods and the wages. Both readings
+ * agree at any trip count. (An earlier model subtracted the whole transport
+ * charge from the goods margin as "hidden profit", which understated profit
+ * by exactly the transport revenue; that figure is gone.)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resaleTripCount = resaleTripCount;
@@ -46,18 +56,18 @@ function calcResale(tx) {
     const totalBuyCost = (Number(tx.factoryPurchasePrice) || 0) * qty;
     const totalSellRevenue = (Number(tx.productUnitPrice) || 0) * qty;
     const grossProductProfit = totalSellRevenue - totalBuyCost;
-    const costPerTrip = (Number(tx.truckCost) || 0) + (Number(tx.driverCost) || 0) + (Number(tx.explicitProfit) || 0);
+    const costPerTrip = Number(tx.truckCost) || 0;
+    const marginPerTrip = costPerTrip - (Number(tx.driverCost) || 0);
     const transportTotal = trips * costPerTrip;
-    const hiddenProfit = grossProductProfit - transportTotal;
-    const netRealProfit = hiddenProfit + trips * (Number(tx.explicitProfit) || 0);
+    const netRealProfit = grossProductProfit + trips * marginPerTrip;
     return {
         trips,
         totalBuyCost,
         totalSellRevenue,
         grossProductProfit,
         costPerTrip,
+        marginPerTrip,
         transportTotal,
-        hiddenProfit,
         netRealProfit,
         invoiceTotal: totalSellRevenue + transportTotal,
     };

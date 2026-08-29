@@ -73,6 +73,10 @@ router.get('/export', asyncHandler(async (_req: Request, res: Response) => {
   const backup = {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
+    // Which pricing-model restatements this data has been through (migrations
+    // 011/012 stamp these). Import reads them to decide whether the rows must
+    // be restated on arrival — see the import handler.
+    schemaFlags: db.prepare('SELECT key FROM schema_flags').all().map((r: any) => r.key),
     tables,
   };
 
@@ -159,6 +163,16 @@ router.post('/import', asyncHandler(async (req: Request, res: Response) => {
 
   const counts: Record<string, number> = {};
 
+  // Backups exported before migrations 011/012 hold trips and resales under
+  // the OLD pricing model (client fee = truck + wage + margin summed). This
+  // database has already been restated, so inserting those rows verbatim
+  // would silently bill every imported trip only its truck share — an
+  // invoice collapse. Old backups carry no schemaFlags field at all; newer
+  // ones list exactly which restatements their data has been through.
+  const importedFlags: string[] = Array.isArray(req.body.schemaFlags) ? req.body.schemaFlags : [];
+  const needsTripRestatement = !importedFlags.includes('trip_fee_model_v2');
+  const needsResaleRestatement = !importedFlags.includes('resale_transport_model_v2');
+
   const importTransaction = db.transaction(() => {
     // Clear children before parents so FK constraints are never violated.
     for (const table of [...TABLES].reverse()) {
@@ -183,6 +197,59 @@ router.post('/import', asyncHandler(async (req: Request, res: Response) => {
       }
       counts[table] = rows.length;
     }
+
+    // Restate old-model rows with the exact arithmetic of migrations 011/012
+    // (all SET right-hand sides read the pre-update values, so the order of
+    // assignments does not matter). What the client owed and the driver
+    // earned are preserved; only the profit is recomputed under the new rule.
+    if (needsTripRestatement) {
+      db.prepare(`
+        UPDATE client_trips
+        SET truck_cost     = truck_cost + driver_cut + company_profit,
+            company_profit = truck_cost + company_profit,
+            updated_at     = datetime('now'), synced_at = NULL
+      `).run();
+    }
+    if (needsResaleRestatement) {
+      db.prepare(`
+        UPDATE material_resales
+        SET truck_cost      = truck_cost + driver_cost + explicit_profit,
+            explicit_profit = truck_cost + explicit_profit,
+            updated_at      = datetime('now'), synced_at = NULL
+      `).run();
+    }
+
+    // The paid caches are derived data. Re-derive them from the imported
+    // allocation rows instead of trusting whatever the file carried — a
+    // backup taken while a cache was inconsistent would otherwise preserve
+    // the inconsistency forever.
+    db.prepare(`
+      UPDATE client_trips SET client_paid = COALESCE((
+        SELECT SUM(amount) FROM client_payment_allocations
+        WHERE trip_type = 'transport' AND trip_id = client_trips.id), 0)
+    `).run();
+    db.prepare(`
+      UPDATE client_trips SET driver_paid = COALESCE((
+        SELECT SUM(amount) FROM driver_payment_allocations
+        WHERE trip_type = 'transport' AND trip_id = client_trips.id), 0)
+    `).run();
+    db.prepare(`
+      UPDATE material_resales SET
+        client_paid = COALESCE((
+          SELECT SUM(amount) FROM client_payment_allocations
+          WHERE trip_type = 'resale' AND trip_id = material_resales.id), 0),
+        driver_paid = COALESCE((
+          SELECT SUM(amount) FROM driver_payment_allocations
+          WHERE trip_type = 'resale' AND trip_id = material_resales.id), 0),
+        supplier_paid = COALESCE((
+          SELECT SUM(amount) FROM supplier_payment_allocations
+          WHERE target_type = 'resale' AND target_id = material_resales.id), 0)
+    `).run();
+    db.prepare(`
+      UPDATE supplier_invoices SET paid = COALESCE((
+        SELECT SUM(amount) FROM supplier_payment_allocations
+        WHERE target_type = 'invoice' AND target_id = supplier_invoices.id), 0)
+    `).run();
   });
 
   importTransaction();

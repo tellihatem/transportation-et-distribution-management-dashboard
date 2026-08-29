@@ -8,6 +8,8 @@ import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
 
+import { firstNegativeMoneyField } from '../trip-math';
+
 const router = Router();
 
 /**
@@ -120,6 +122,11 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     throw createApiError('Expense ID already exists', 409, 'DUPLICATE_ID');
   }
 
+  // A negative expense would silently INCREASE profit.
+  if (firstNegativeMoneyField({ amount })) {
+    throw createApiError('Field amount must not be negative', 400, 'VALIDATION_ERROR');
+  }
+
   db.prepare(`
     INSERT INTO expenses (id, date, category, truck_plate, amount, status)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -140,12 +147,16 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 
   const { date, category, truckPlate, amount, status } = req.body;
 
+  if (firstNegativeMoneyField({ amount })) {
+    throw createApiError('Field amount must not be negative', 400, 'VALIDATION_ERROR');
+  }
+
   db.prepare(`
     UPDATE expenses SET
       date = ?, category = ?, truck_plate = ?, amount = ?,
       status = ?, updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, category, truckPlate, amount, status, req.params.id);
+  `).run(date, category, truckPlate || '', amount || 0, status || 'Paid', req.params.id);
 
   const updated = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
   queueSync('expenses', req.params.id, 'upsert', updated);

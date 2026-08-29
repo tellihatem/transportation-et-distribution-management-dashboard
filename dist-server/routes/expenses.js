@@ -11,6 +11,7 @@ const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
 const replicator_1 = require("../sync/replicator");
+const trip_math_1 = require("../trip-math");
 const router = (0, express_1.Router)();
 /**
  * GET /api/expenses — List all expenses with optional filters
@@ -109,6 +110,10 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     if (existing) {
         throw (0, error_handler_1.createApiError)('Expense ID already exists', 409, 'DUPLICATE_ID');
     }
+    // A negative expense would silently INCREASE profit.
+    if ((0, trip_math_1.firstNegativeMoneyField)({ amount })) {
+        throw (0, error_handler_1.createApiError)('Field amount must not be negative', 400, 'VALIDATION_ERROR');
+    }
     database_1.default.prepare(`
     INSERT INTO expenses (id, date, category, truck_plate, amount, status)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -125,12 +130,15 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     if (!existing)
         throw (0, error_handler_1.createApiError)('Expense not found', 404, 'NOT_FOUND');
     const { date, category, truckPlate, amount, status } = req.body;
+    if ((0, trip_math_1.firstNegativeMoneyField)({ amount })) {
+        throw (0, error_handler_1.createApiError)('Field amount must not be negative', 400, 'VALIDATION_ERROR');
+    }
     database_1.default.prepare(`
     UPDATE expenses SET
       date = ?, category = ?, truck_plate = ?, amount = ?,
       status = ?, updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
-  `).run(date, category, truckPlate, amount, status, req.params.id);
+  `).run(date, category, truckPlate || '', amount || 0, status || 'Paid', req.params.id);
     const updated = database_1.default.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
     (0, replicator_1.queueSync)('expenses', req.params.id, 'upsert', updated);
     res.json({ success: true, data: mapRowToExpense(updated) });

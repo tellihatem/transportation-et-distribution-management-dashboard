@@ -52,7 +52,6 @@ import {
   ComposedChart,
   Line
 } from "recharts";
-import { motion, AnimatePresence } from "motion/react";
 
 import { ClientTransportTrip, ClientTransportTripInput, MaterialResaleTx, MaterialResaleTxInput, OtherExpense, TabFilters } from "./types";
 import { TRANSLATE_EXPENSE_CATEGORY, EXPENSE_CATEGORIES } from "./data";
@@ -68,7 +67,9 @@ import { DriverAccountsTab } from "./components/DriverAccountsTab";
 import { SupplierAccountsTab } from "./components/SupplierAccountsTab";
 import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { chartTheme } from "./chart-theme";
-import { downloadBackup, importBackup, resetAllData, fetchNextTripId, fetchNextResaleId, fetchNextExpenseId, fetchTripById, fetchResaleById } from "./api/client";
+import { EntryModal } from "./components/EntryModal";
+import { tripClientFee, tripCompanyProfit } from "../server/trip-math";
+import { downloadBackup, importBackup, resetAllData, fetchTripById, fetchResaleById } from "./api/client";
 import logoUrl from "../assets/logo.png";
 import { T } from "./strings";
 import { calcResale } from "../server/resale-math";
@@ -165,7 +166,7 @@ export default function App() {
     }
   }, [theme]);
 
-  const charts = chartTheme(theme);
+  const charts = useMemo(() => chartTheme(theme), [theme]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"add" | "edit">("add");
@@ -178,69 +179,10 @@ export default function App() {
     data: any;
   } | null>(null);
 
-  // --- Dynamic Form States for adding/editing records ---
-  // State for Trip (Tab 1 Form)
-  const [tripForm, setTripForm] = useState<Partial<ClientTransportTripInput>>({
-    id: "",
-    date: new Date().toISOString().split("T")[0],
-    clientName: "",
-    originFactory: "",
-    destination: "",
-    materialType: "",
-    totalTonnage: 30,
-    quantityUnit: T.common.defaultUnit,
-    truckCost: 15000,
-    driverCut: 5000,
-    companyProfit: 5000,
-    driverName: "",
-  });
-
-  // State for Resale (Tab 2 Form)
-  const [resaleForm, setResaleForm] = useState<Partial<MaterialResaleTxInput>>({
-    id: "",
-    date: new Date().toISOString().split("T")[0],
-    endClient: "",
-    destination: "",
-    materialType: "",
-    originFactory: "",
-    factoryPurchasePrice: 1500,
-    productUnitPrice: 4500,
-    totalTonnage: 40,
-    quantityUnit: T.common.defaultUnit,
-    clientSellingPrice: 150000,
-    truckCost: 18000,
-    driverCost: 5000,
-    explicitProfit: 8000,
-    driverName: "",
-    tripCount: 1,
-  });
-
-  // State for Expense (Tab 3 Form)
-  const [expenseForm, setExpenseForm] = useState<Partial<OtherExpense>>({
-    id: "",
-    date: new Date().toISOString().split("T")[0],
-    category: "Fuel",
-    truckPlate: "",
-    amount: 15000,
-    status: "Paid"
-  });
-
-  // Automatically compute Total Fee suggestion for Tab 1 as feedback in form
-  const computedFormTotalTransportFee = (Number(tripForm.truckCost) || 0) + (Number(tripForm.driverCut) || 0) + (Number(tripForm.companyProfit) || 0);
-
-  // Live figures for the resale modal. Every number the form shows comes from
-  // this one call, so the goods section, the transport section and the profit
-  // summary cannot disagree — and a transport label can no longer end up
-  // displaying a product-margin value.
-  const resaleCalc = calcResale({
-    factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
-    productUnitPrice: Number(resaleForm.productUnitPrice) || 0,
-    totalTonnage: Number(resaleForm.totalTonnage) || 0,
-    truckCost: Number(resaleForm.truckCost) || 0,
-    driverCost: Number(resaleForm.driverCost) || 0,
-    explicitProfit: Number(resaleForm.explicitProfit) || 0,
-    tripCount: Number(resaleForm.tripCount) || 1,
-  });
+  // Entry-dialog plumbing. The forms themselves live in EntryModal; App only
+  // remembers what the dialog was opened FOR, and remounts it per open.
+  const [modalInitial, setModalInitial] = useState<any>(null);
+  const [modalNonce, setModalNonce] = useState(0);
 
   // --- Financial Calculations (Global Dashboard Cards) ---
   // Filtered Client Transport records
@@ -299,25 +241,19 @@ export default function App() {
     let grossRevenue = 0; // Total transport fee = truck cost + driver cut + company profit
     let driverPayout = 0;
     let netMargin = 0; // Company Profit
-    let totalTons = 0;
     let clientOutstanding = 0; // Still owed by clients
     let driverOutstanding = 0; // Still owed to drivers
-    let clientCollected = 0;   // Cash actually received (from the client ledger)
-    let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
 
     filteredClientTrips.forEach(trip => {
-      const tripFee = trip.truckCost + trip.driverCut + trip.companyProfit;
+      const tripFee = tripClientFee(trip);
       grossRevenue += tripFee;
       driverPayout += trip.driverCut;
       netMargin += trip.companyProfit;
-      totalTons += trip.totalTonnage;
       clientOutstanding += Math.max(0, tripFee - (trip.clientPaid || 0));
       driverOutstanding += Math.max(0, trip.driverCut - (trip.driverPaid || 0));
-      clientCollected += (trip.clientPaid || 0);
-      driverSettled += (trip.driverPaid || 0);
     });
 
-    return { grossRevenue, driverPayout, netMargin, totalTons, clientOutstanding, driverOutstanding, clientCollected, driverSettled };
+    return { grossRevenue, driverPayout, netMargin, clientOutstanding, driverOutstanding };
   }, [filteredClientTrips]);
 
   // Tab 2 Profits
@@ -325,27 +261,23 @@ export default function App() {
     let tradingTurnover = 0; // client selling price
     let capitalOutlay = 0;    // purchase price * tonnage
     let totalTrueProfit = 0;
-    let totalTons = 0;
     let clientOutstanding = 0; // Still owed by clients
     let driverOutstanding = 0; // Still owed to drivers
-    let clientCollected = 0;   // Cash actually received (from the client ledger)
-    let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
+    let transportBilled = 0;   // trips × hire, the transport share of invoices
 
     filteredResaleTxs.forEach(tx => {
       const m = calcResale(tx);
       const driverWage = m.trips * tx.driverCost;
 
+      transportBilled += m.transportTotal;
       tradingTurnover += m.invoiceTotal;
       capitalOutlay += m.totalBuyCost;
       totalTrueProfit += m.netRealProfit;
-      totalTons += tx.totalTonnage;
       clientOutstanding += Math.max(0, tx.clientSellingPrice - (tx.clientPaid || 0));
       driverOutstanding += Math.max(0, driverWage - (tx.driverPaid || 0));
-      clientCollected += (tx.clientPaid || 0);
-      driverSettled += (tx.driverPaid || 0);
     });
 
-    return { tradingTurnover, capitalOutlay, totalTrueProfit, totalTons, clientOutstanding, driverOutstanding, clientCollected, driverSettled };
+    return { tradingTurnover, capitalOutlay, totalTrueProfit, transportBilled, clientOutstanding, driverOutstanding };
   }, [filteredResaleTxs]);
 
   // Tab 3 Expenses
@@ -374,7 +306,23 @@ export default function App() {
   // transport + resale, minus approved operating expenses. This is what the
   // business made on paper — it is NOT cash in hand, because a trip counts as
   // soon as it is invoiced whether or not the client has paid.
-  const masterNetProfit = (tab1Stats.netMargin + tab2Stats.totalTrueProfit) - tab3Stats.totalOverhead;
+  // Money the company has handed out that no work has earned back yet: a
+  // driver's سلفة beyond his wages, and factory advances beyond goods
+  // received. It has left the pocket, so the headline profit drops by it —
+  // and comes back on its own as the work arrives, because the deduction here
+  // falls to zero at the same moment the wage or goods cost starts being
+  // counted inside that work's own profit.
+  // NET basis (paid beyond earned/owed), not the drawdown balances: once the
+  // work or goods exist, their cost already sits inside the profit above, and
+  // deducting the still-unapplied payment as well would count it twice.
+  const driverAdvancesOut = driverSummaries.reduce((sum, d) => sum + d.unearnedAdvance, 0);
+  const supplierPrepaidOut = supplierSummaries.reduce((sum, sup) => sum + sup.unmatchedPrepaid, 0);
+
+  const masterNetProfit =
+    (tab1Stats.netMargin + tab2Stats.totalTrueProfit)
+    - tab3Stats.totalOverhead
+    - driverAdvancesOut
+    - supplierPrepaidOut;
 
   // Actual cash position, taken from the client/driver ledgers (the same
   // all-time summaries the Client/Driver Accounts tabs use). This is
@@ -393,69 +341,18 @@ export default function App() {
   // --- Add / Edit Records Logic ---
   // IDs are sequential (TR-1, TR-2, ...), computed server-side from the full
   // table so month/search filters on the loaded list can't cause collisions.
-  const localNextId = (prefix: string, ids: string[]) => {
-    const max = ids.reduce((m, id) => {
-      const match = id.match(/(\d+)\s*$/);
-      return match ? Math.max(m, parseInt(match[1], 10)) : m;
-    }, 0);
-    return `${prefix}${max + 1}`;
-  };
-
   const [modalRecordType, setModalRecordType] = useState<"transport" | "resale" | "expenses">("transport");
 
-  const handleOpenAdd = async (type?: "transport" | "resale" | "expenses") => {
+  const handleOpenAdd = (type?: "transport" | "resale" | "expenses") => {
     setModalType("add");
     setEditRecordId(null);
     const targetType = type || (activeTab === "resale" ? "resale" : activeTab === "expenses" ? "expenses" : "transport");
     setModalRecordType(targetType);
-
-    if (targetType === "transport") {
-      const id = await fetchNextTripId().catch(() => localNextId("TR-", clientTrips.map(t => t.id)));
-      setTripForm({
-        id,
-        date: new Date().toISOString().split("T")[0],
-        clientName: "",
-        originFactory: "",
-        destination: "",
-        materialType: "",
-        totalTonnage: 32,
-        quantityUnit: T.common.defaultUnit,
-        truckCost: 15000,
-        driverCut: 5000,
-        companyProfit: 6000,
-        driverName: "",
-      });
-    } else if (targetType === "resale") {
-      const id = await fetchNextResaleId().catch(() => localNextId("RS-", resaleTxs.map(t => t.id)));
-      setResaleForm({
-        id,
-        date: new Date().toISOString().split("T")[0],
-        endClient: "",
-        destination: "",
-        materialType: "",
-        originFactory: "",
-        factoryPurchasePrice: 1500,
-        productUnitPrice: 4500,
-        totalTonnage: 40,
-        quantityUnit: T.common.defaultUnit,
-        clientSellingPrice: 180000,
-        truckCost: 18000,
-        driverCost: 5000,
-        explicitProfit: 8000,
-        driverName: "",
-        tripCount: 1,
-      });
-    } else {
-      const id = await fetchNextExpenseId().catch(() => localNextId("EXP-", expenses.map(e => e.id)));
-      setExpenseForm({
-        id,
-        date: new Date().toISOString().split("T")[0],
-        category: "Fuel",
-        truckPlate: "",
-        amount: 15000,
-        status: "Paid"
-      });
-    }
+    // The dialog opens IMMEDIATELY; EntryModal fetches the next id itself and
+    // shows a placeholder meanwhile. Waiting on /next-id here used to make
+    // the Add button look dead whenever the server was busy.
+    setModalInitial(null);
+    setModalNonce(n => n + 1);
     setIsModalOpen(true);
   };
 
@@ -464,14 +361,8 @@ export default function App() {
     setEditRecordId(record.id);
     const targetType = type || (record.endClient ? "resale" : record.category ? "expenses" : "transport");
     setModalRecordType(targetType);
-
-    if (targetType === "transport") {
-      setTripForm({ ...record });
-    } else if (targetType === "resale") {
-      setResaleForm({ ...record });
-    } else {
-      setExpenseForm({ ...record });
-    }
+    setModalInitial({ ...record });
+    setModalNonce(n => n + 1);
     setIsModalOpen(true);
   };
 
@@ -506,75 +397,24 @@ export default function App() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      if (modalRecordType === "transport") {
-        const data: ClientTransportTripInput = {
-          id: tripForm.id || localNextId("TR-", clientTrips.map(t => t.id)),
-          date: tripForm.date || "",
-          clientName: tripForm.clientName || "",
-          originFactory: tripForm.originFactory || "",
-          destination: tripForm.destination || "",
-          materialType: tripForm.materialType || "",
-          totalTonnage: Number(tripForm.totalTonnage) || 0,
-          quantityUnit: tripForm.quantityUnit || T.common.defaultUnit,
-          truckCost: Number(tripForm.truckCost) || 0,
-          driverCut: Number(tripForm.driverCut) || 0,
-          companyProfit: Number(tripForm.companyProfit) || 0,
-          driverName: tripForm.driverName || ""
-        };
-
-        if (modalType === "add") {
-          await addTrip(data);
-        } else {
-          await editTrip(editRecordId!, data);
-        }
-      } else if (modalRecordType === "resale") {
-        const data: MaterialResaleTxInput = {
-          id: resaleForm.id || localNextId("RS-", resaleTxs.map(t => t.id)),
-          date: resaleForm.date || "",
-          endClient: resaleForm.endClient || "",
-          destination: resaleForm.destination || "",
-          materialType: resaleForm.materialType || "",
-          originFactory: resaleForm.originFactory || "",
-          factoryPurchasePrice: Number(resaleForm.factoryPurchasePrice) || 0,
-          productUnitPrice: Number(resaleForm.productUnitPrice) || 0,
-          totalTonnage: Number(resaleForm.totalTonnage) || 0,
-          quantityUnit: resaleForm.quantityUnit || T.common.defaultUnit,
-          truckCost: Number(resaleForm.truckCost) || 0,
-          driverCost: Number(resaleForm.driverCost) || 0,
-          explicitProfit: Number(resaleForm.explicitProfit) || 0,
-          driverName: resaleForm.driverName || "",
-          tripCount: Math.max(1, Number(resaleForm.tripCount) || 1),
-        };
-
-        if (modalType === "add") {
-          await addResale(data);
-        } else {
-          await editResale(editRecordId!, data);
-        }
-      } else {
-        const data: OtherExpense = {
-          id: expenseForm.id || localNextId("EXP-", expenses.map(e => e.id)),
-          date: expenseForm.date || "",
-          category: expenseForm.category || "Fuel",
-          truckPlate: expenseForm.truckPlate || T.expenses.unknownPlate,
-          amount: Number(expenseForm.amount) || 0,
-          status: expenseForm.status as 'Paid' | 'Pending' || "Paid"
-        };
-
-        if (modalType === "add") {
-          await addExpense(data);
-        } else {
-          await editExpense(editRecordId!, data);
-        }
-      }
-      setIsModalOpen(false);
-      refreshAllData();
-    } catch (err: any) {
-      alert(T.dialogs.saveFailed(err.message));
+  /**
+   * Persist what EntryModal built. Throws on failure so the dialog can show
+   * the error and stay open; on success the dialog closes and everything
+   * refreshes.
+   */
+  const handleModalSubmit = async (data: any) => {
+    if (modalRecordType === "transport") {
+      if (modalType === "add") await addTrip(data);
+      else await editTrip(editRecordId!, data);
+    } else if (modalRecordType === "resale") {
+      if (modalType === "add") await addResale(data);
+      else await editResale(editRecordId!, data);
+    } else {
+      if (modalType === "add") await addExpense(data);
+      else await editExpense(editRecordId!, data);
     }
+    setIsModalOpen(false);
+    refreshAllData();
   };
 
   // --- Local printable formatted Receipt Generator ---
@@ -588,11 +428,15 @@ export default function App() {
     if (selectedReceipt) {
       document.title = `${T.dialogs.receiptFilePrefix}-${selectedReceipt.data.id}`;
     }
+    let restored = false;
     const restoreTitle = () => {
+      if (restored) return;
+      restored = true;
       document.title = originalTitle;
-      window.removeEventListener("afterprint", restoreTitle);
     };
-    window.addEventListener("afterprint", restoreTitle);
+    // Electron does not always deliver afterprint — see the statement tabs.
+    window.addEventListener("afterprint", restoreTitle, { once: true });
+    setTimeout(restoreTitle, 120000);
     window.print();
   };
 
@@ -649,11 +493,13 @@ export default function App() {
     }
   };
 
-  // Stacked chart data formatting for Tab 1 Cost breakdown
+  // Stacked chart data for Tab 1: how each trip's hire splits between the
+  // driver's wage and the company's margin. The hire itself is NOT a third
+  // segment — it is the sum of these two, so stacking it as well would draw
+  // every bar at twice the trip's real value.
   const tab1ChartData = useMemo(() => {
     return filteredClientTrips.slice(0, 10).map(trip => ({
       name: trip.id,
-      [T.charts.truckCost]: trip.truckCost,
       [T.charts.driverDue]: trip.driverCut,
       [T.charts.companyMargin]: trip.companyProfit,
     })).reverse();
@@ -814,7 +660,7 @@ export default function App() {
 
             {(() => {
               const factureTotal = selectedReceipt.type === "transport"
-                ? selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit
+                ? tripClientFee(selectedReceipt.data)
                 : selectedReceipt.data.clientSellingPrice;
               const facturePaid = selectedReceipt.data.clientPaid || 0;
               const factureRemaining = factureTotal - facturePaid;
@@ -1046,6 +892,16 @@ export default function App() {
                     <span className="text-[10px] text-slate-500">{T.master.fleetExpenses}</span>
                     <span className="text-rose-400 font-bold font-mono">-{tab3Stats.totalOverhead.toLocaleString()} {T.common.currency}</span>
                   </div>
+                  <span className="text-slate-600 font-bold text-lg">-</span>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-500">{T.master.driverAdvancesOut}</span>
+                    <span className="text-rose-400 font-bold font-mono">{driverAdvancesOut > 0 ? `-${driverAdvancesOut.toLocaleString()}` : "0"} {T.common.currency}</span>
+                  </div>
+                  <span className="text-slate-600 font-bold text-lg">-</span>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-500">{T.master.supplierPrepaidOut}</span>
+                    <span className="text-rose-400 font-bold font-mono">{supplierPrepaidOut > 0 ? `-${supplierPrepaidOut.toLocaleString()}` : "0"} {T.common.currency}</span>
+                  </div>
                   <span className="text-slate-500 font-bold text-lg">=</span>
                   <div className="bg-slate-800/40 px-3 py-1 rounded border border-slate-700 flex flex-col">
                     <span className="text-[10px] text-cyan-400 font-bold">{T.master.netProfit}</span>
@@ -1098,7 +954,7 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <TrendingDown className="h-4 w-4 text-rose-400 animate-bounce" />
+                      <TrendingDown className="h-4 w-4 text-rose-400" />
                       <span className="text-rose-300">{T.master.unhealthy}</span>
                     </>
                   )}
@@ -1249,36 +1105,26 @@ export default function App() {
 
         {/* CONTAINER CONTENT ACCORDING TO TABS */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-          <AnimatePresence mode="wait">
 
             {/* TAB OVERVIEW: EXECUTIVE DASHBOARD */}
             {activeTab === "overview" && (
-              <motion.div
-                key="tab-overview"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-overview" className="">
                 <ExecutiveOverviewTab
-                  trips={clientTrips}
-                  resales={resaleTxs}
-                  expenses={expenses}
+                  trips={filteredClientTrips}
+                  resales={filteredResaleTxs}
+                  expenses={filteredExpenses}
                   clientSummaries={clientSummaries}
                   driverSummaries={driverSummaries}
+                  supplierSummaries={supplierSummaries}
                   onNavigateTab={tab => setActiveTab(tab)}
                   charts={charts}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB CLIENTS: CLIENT ACCOUNTS & RECEIVABLES */}
             {activeTab === "clients" && (
-              <motion.div
-                key="tab-clients"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-clients" className="">
                 <ClientAccountsTab
                   summaries={clientSummaries}
                   loading={false}
@@ -1288,17 +1134,12 @@ export default function App() {
                   onDeletePayment={removeClientPaymentRecord}
                   onRefreshTrips={refreshAllData}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB DRIVERS: DRIVER ACCOUNTS & SETTLEMENTS */}
             {activeTab === "drivers" && (
-              <motion.div
-                key="tab-drivers"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-drivers" className="">
                 <DriverAccountsTab
                   summaries={driverSummaries}
                   loading={false}
@@ -1309,17 +1150,12 @@ export default function App() {
                   onEditTrip={handleEditTripById}
                   onRefreshTrips={refreshAllData}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB SUPPLIERS: SUPPLIER/FACTORY BALANCES & DEBTS */}
             {activeTab === "suppliers" && (
-              <motion.div
-                key="tab-suppliers"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-              >
+              <div key="tab-suppliers" className="">
                 <SupplierAccountsTab
                   summaries={supplierSummaries}
                   loading={false}
@@ -1333,18 +1169,12 @@ export default function App() {
                   onDeductAdvance={deductSupplierAdvance}
                   onRefresh={refreshAllData}
                 />
-              </motion.div>
+              </div>
             )}
 
             {/* TAB 1: CLIENT TRANSPORT (شحن لصالح العملاء) */}
             {activeTab === "transport" && (
-              <motion.div
-                key="tab-transport"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="space-y-6"
-              >
+              <div key="tab-transport" className="space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1419,7 +1249,6 @@ export default function App() {
                             <XAxis type="number" stroke={charts.axis} fontSize={9} />
                             <YAxis type="category" dataKey="name" stroke={charts.axis} fontSize={9} width={45} />
                             <Tooltip contentStyle={{ background: charts.tooltipBg, border: `1px solid ${charts.tooltipBorder}`, color: charts.tooltipText }} />
-                            <Bar dataKey={T.charts.truckCost} stackId="a" fill="#3b82f6" />
                             <Bar dataKey={T.charts.driverDue} stackId="a" fill="#10b981" />
                             <Bar dataKey={T.charts.companyMargin} stackId="a" fill="#06b6d4" />
                           </BarChart>
@@ -1428,10 +1257,6 @@ export default function App() {
                     </div>
 
                     <div className="flex gap-2 text-[10px] text-slate-400 mt-4 justify-around bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                      <div className="flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
-                        <span>{T.transport.legendTrucks}</span>
-                      </div>
                       <div className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-[#10b981]"></span>
                         <span>{T.transport.legendDrivers}</span>
@@ -1479,7 +1304,7 @@ export default function App() {
                               </tr>
                             ) : (
                               filteredClientTrips.map(trip => {
-                                const totalCost = trip.truckCost + trip.driverCut + trip.companyProfit;
+                                const totalCost = tripClientFee(trip);
                                 return (
                                   <tr key={trip.id} className="hover:bg-slate-800/40 transition">
                                     <td className="p-3 font-mono font-bold text-blue-400">{trip.id}</td>
@@ -1551,18 +1376,12 @@ export default function App() {
                   </div>
 
                 </div>
-              </motion.div>
+              </div>
             )}
 
             {/* TAB 2: MATERIAL RESALE (شراء وإعادة بيع المواد) */}
             {activeTab === "resale" && (
-              <motion.div
-                key="tab-resale"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="space-y-6"
-              >
+              <div key="tab-resale" className="space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1586,7 +1405,7 @@ export default function App() {
                       <DollarSign className="h-4 w-4 text-blue-500" />
                     </div>
                     <span className="text-2xl font-black font-mono text-blue-400 block mt-1">
-                      {filteredResaleTxs.reduce((sum, tx) => sum + calcResale(tx).transportTotal, 0).toLocaleString()} {T.common.currency}
+                      {tab2Stats.transportBilled.toLocaleString()} {T.common.currency}
                     </span>
                     <span className="text-[10px] text-slate-500">{T.resale.kpiVisibleTransportHint}</span>
                   </div>
@@ -1695,7 +1514,7 @@ export default function App() {
                               filteredResaleTxs.map(tx => {
                                 const m = calcResale(tx);
                                 const sourcingCost = m.totalBuyCost;
-                                const hiddenMargin = m.hiddenProfit;
+                                const goodsMargin = m.grossProductProfit;
                                 const totalTrueProfit = m.netRealProfit;
 
                                 return (
@@ -1713,8 +1532,8 @@ export default function App() {
                                       <div>{T.resale.cellSelling} {tx.clientSellingPrice.toLocaleString()}</div>
                                       <div className="text-[10px] text-slate-500">{T.resale.cellCost} {sourcingCost.toLocaleString()}</div>
                                     </td>
-                                    <td className={`p-3 font-mono font-semibold ${hiddenMargin >= 0 ? "text-amber-400" : "text-rose-400"}`}>
-                                      {hiddenMargin.toLocaleString()} {T.common.currency}
+                                    <td className={`p-3 font-mono font-semibold ${goodsMargin >= 0 ? "text-amber-400" : "text-rose-400"}`}>
+                                      {goodsMargin.toLocaleString()} {T.common.currency}
                                     </td>
                                     <td className="p-3 font-mono font-bold text-emerald-400">
                                       {totalTrueProfit.toLocaleString()} {T.common.currency}
@@ -1726,9 +1545,9 @@ export default function App() {
                                     <td className="p-3">
                                       <div className="font-bold text-slate-100">{tx.driverName || "—"}</div>
                                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                        {(tx.driverPaid || 0).toLocaleString()} / {tx.driverCost.toLocaleString()} {T.common.currency}
+                                        {(tx.driverPaid || 0).toLocaleString()} / {(m.trips * tx.driverCost).toLocaleString()} {T.common.currency}
                                       </div>
-                                      <div className="mt-1"><PaymentBadge paid={tx.driverPaid || 0} total={tx.driverCost} /></div>
+                                      <div className="mt-1"><PaymentBadge paid={tx.driverPaid || 0} total={m.trips * tx.driverCost} /></div>
                                     </td>
                                     <td className="p-3">
                                       <div className="flex items-center gap-1.5 justify-end">
@@ -1769,18 +1588,12 @@ export default function App() {
                   </div>
 
                 </div>
-              </motion.div>
+              </div>
             )}
 
             {/* TAB 3: OTHER EXPENSES (المصاريف الأخرى الأسطول) */}
             {activeTab === "expenses" && (
-              <motion.div
-                key="tab-expenses"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="space-y-6"
-              >
+              <div key="tab-expenses" className="space-y-6">
                 {/* Visual KPI Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
@@ -1892,7 +1705,7 @@ export default function App() {
                                     {TRANSLATE_EXPENSE_CATEGORY[exp.category] || exp.category}
                                   </td>
                                   <td className="p-3 text-slate-400 font-mono">{exp.truckPlate}</td>
-                                  <td className="p-3 font-mono font-bold text-rose-400">{exp.amount.toLocaleString()} {T.common.currency}</td>
+                                  <td className={`p-3 font-mono font-bold ${exp.status === "Pending" ? "text-slate-400" : "text-rose-400"}`}>{exp.amount.toLocaleString()} {T.common.currency}</td>
                                   <td className="p-3">
                                     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${exp.status === "Paid"
                                       ? "bg-emerald-900/30 text-emerald-400 border border-emerald-800/65"
@@ -1929,17 +1742,16 @@ export default function App() {
                   </div>
 
                 </div>
-              </motion.div>
+              </div>
             )}
 
-          </AnimatePresence>
         </section>
 
       </div>
 
       {/* RENDER MODAL: WIPE THE DATABASE (irreversible — typed confirmation) */}
       {isResetOpen && (
-        <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex dialog-scroll justify-center p-4">
           <div className="bg-slate-900 border border-rose-900/70 max-w-md w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative dir-rtl">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-600 to-red-500"></div>
 
@@ -1996,563 +1808,25 @@ export default function App() {
         </div>
       )}
 
-      {/* RENDER MODAL: FOR ADD/EDIT WORKFLOW */}
-      <AnimatePresence>
+        {/* Add/edit dialog — its form state lives inside EntryModal so a
+            keystroke re-renders the dialog, not the whole app behind it.
+            Keyed per open: the forms initialise fresh with no sync effects. */}
         {isModalOpen && (
-          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 max-w-lg w-full rounded-2xl overflow-hidden p-6 shadow-2xl relative"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
-
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-5">
-                <h3 className="text-base font-extrabold text-slate-100 flex items-center gap-2">
-                  <Truck className="h-4.5 w-4.5 text-blue-500" />
-                  <span>
-                    {modalType === "add" ? T.form.titleAdd : T.form.titleEdit}
-                  </span>
-                  <span className="text-xs font-normal text-slate-400">
-                    ({modalRecordType === "transport" ? T.form.kindTransport : modalRecordType === "resale" ? T.form.kindResale : T.form.kindExpense})
-                  </span>
-                </h3>
-                <button
-                  onClick={() => setIsModalOpen(false)}
-                  className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Suggested quantity units — the field stays free-text so any
-                  other unit can be typed in directly. */}
-              <datalist id="quantity-units">
-                {QUANTITY_UNITS.map(u => <option key={u} value={u} />)}
-              </datalist>
-
-              {/* DYNAMIC FORMS ACCORDING TO TABS */}
-              <form onSubmit={handleSubmit} className="space-y-4">
-
-                {modalRecordType === "transport" && (
-                  <div className="space-y-3 text-xs">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.tripId}</label>
-                        <input
-                          type="text"
-                          required
-                          disabled={modalType === "edit"}
-                          value={tripForm.id}
-                          onChange={e => setTripForm(p => ({ ...p, id: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.date}</label>
-                        <input
-                          type="date"
-                          required
-                          value={tripForm.date}
-                          onChange={e => setTripForm(p => ({ ...p, date: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.clientName}</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder={T.form.clientNamePlaceholder}
-                          value={tripForm.clientName}
-                          onChange={e => setTripForm(p => ({ ...p, clientName: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.driverName}</label>
-                        <input
-                          type="text"
-                          placeholder={T.form.tripDriverPlaceholder}
-                          value={tripForm.driverName}
-                          onChange={e => setTripForm(p => ({ ...p, driverName: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.originFactory}</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder={T.form.originFactoryPlaceholder}
-                          value={tripForm.originFactory}
-                          onChange={e => setTripForm(p => ({ ...p, originFactory: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.destination}</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder={T.form.destinationPlaceholder}
-                          value={tripForm.destination}
-                          onChange={e => setTripForm(p => ({ ...p, destination: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.materialType}</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder={T.form.materialPlaceholder}
-                          value={tripForm.materialType}
-                          onChange={e => setTripForm(p => ({ ...p, materialType: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.quantity}</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            step="0.1"
-                            required
-                            value={tripForm.totalTonnage}
-                            onChange={e => setTripForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
-                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                          />
-                          <input
-                            type="text"
-                            list="quantity-units"
-                            required
-                            placeholder={T.form.unitPlaceholder}
-                            value={tripForm.quantityUnit}
-                            onChange={e => setTripForm(p => ({ ...p, quantityUnit: e.target.value }))}
-                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* STRUCTURE LOGIC - DRIVERS AND PROFITS CORES */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-cyan-400 font-bold block">{T.form.costBreakdownTitle}</span>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.truckHire}</label>
-                          <input
-                            type="number"
-                            required
-                            value={tripForm.truckCost}
-                            onChange={e => setTripForm(p => ({ ...p, truckCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.driverWage}</label>
-                          <input
-                            type="number"
-                            required
-                            value={tripForm.driverCut}
-                            onChange={e => setTripForm(p => ({ ...p, driverCut: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.companyProfit}</label>
-                          <input
-                            type="number"
-                            required
-                            value={tripForm.companyProfit}
-                            onChange={e => setTripForm(p => ({ ...p, companyProfit: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
-                          />
-                        </div>
-                      </div>
-                      <div className="pt-2 text-[10px] text-slate-400 flex justify-between">
-                        <span>{T.form.estimatedTotalFee}</span>
-                        <strong className="text-emerald-400">{computedFormTotalTransportFee.toLocaleString()} {T.common.currency}</strong>
-                      </div>
-                    </div>
-
-                    {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
-                  </div>
-                )}
-
-                {modalRecordType === "resale" && (
-                  <div className="space-y-3 text-xs">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.resaleId}</label>
-                        <input
-                          type="text"
-                          required
-                          disabled={modalType === "edit"}
-                          value={resaleForm.id}
-                          onChange={e => setResaleForm(p => ({ ...p, id: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.date}</label>
-                        <input
-                          type="date"
-                          required
-                          value={resaleForm.date}
-                          onChange={e => setResaleForm(p => ({ ...p, date: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 mb-1">{T.form.endClient}</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder={T.form.endClientPlaceholder}
-                        value={resaleForm.endClient}
-                        onChange={e => setResaleForm(p => ({ ...p, endClient: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.resaleDestination}</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder={T.form.resaleDestinationPlaceholder}
-                          value={resaleForm.destination}
-                          onChange={e => setResaleForm(p => ({ ...p, destination: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.driverName}</label>
-                        <input
-                          type="text"
-                          placeholder={T.form.resaleDriverPlaceholder}
-                          value={resaleForm.driverName}
-                          onChange={e => setResaleForm(p => ({ ...p, driverName: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.resaleMaterial}</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder={T.form.materialPlaceholder}
-                          value={resaleForm.materialType}
-                          onChange={e => setResaleForm(p => ({ ...p, materialType: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.originFactory}</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder={T.form.originFactoryPlaceholder}
-                          value={resaleForm.originFactory}
-                          onChange={e => setResaleForm(p => ({ ...p, originFactory: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.factoryPurchasePrice}</label>
-                        <input
-                          type="number"
-                          required
-                          value={resaleForm.factoryPurchasePrice}
-                          onChange={e => setResaleForm(p => ({ ...p, factoryPurchasePrice: parseInt(e.target.value) || 0 }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.quantity}</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            required
-                            value={resaleForm.totalTonnage}
-                            onChange={e => setResaleForm(p => ({ ...p, totalTonnage: parseFloat(e.target.value) || 0 }))}
-                            className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                          />
-                          <input
-                            type="text"
-                            list="quantity-units"
-                            required
-                            placeholder={T.form.unitPlaceholder}
-                            value={resaleForm.quantityUnit}
-                            onChange={e => setResaleForm(p => ({ ...p, quantityUnit: e.target.value }))}
-                            className="w-24 shrink-0 bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* ── GOODS ─────────────────────────────────────────────
-                        Buy cost, sell revenue and the profit the goods alone
-                        make. Kept strictly separate from transport below: this
-                        section's margin used to be rendered inside the
-                        logistics box, which made a transport label show a
-                        product figure. */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-amber-400 font-bold block">{T.form.goodsSectionTitle}</span>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.unitSellingPrice}</label>
-                          <input
-                            type="number"
-                            required
-                            value={resaleForm.productUnitPrice ?? ""}
-                            placeholder={T.form.unitSellingPricePlaceholder}
-                            onChange={e => setResaleForm(p => ({ ...p, productUnitPrice: parseFloat(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
-                          />
-                        </div>
-                        <div className="flex flex-col justify-end">
-                          <div className="flex justify-between text-[10px] text-slate-400 pb-1">
-                            <span>{T.form.totalBuyCostLabel}</span>
-                            <strong className="text-rose-300 font-mono">{resaleCalc.totalBuyCost.toLocaleString()} {T.common.currency}</strong>
-                          </div>
-                          <div className="flex justify-between text-[10px] text-slate-400">
-                            <span>{T.form.totalSellRevenueLabel}</span>
-                            <strong className="text-cyan-300 font-mono">{resaleCalc.totalSellRevenue.toLocaleString()} {T.common.currency}</strong>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                        <span>{T.form.grossProductProfitLabel}</span>
-                        <strong className="text-amber-400 font-mono">{resaleCalc.grossProductProfit.toLocaleString()} {T.common.currency}</strong>
-                      </div>
-                    </div>
-
-                    {/* ── TRANSPORT ─────────────────────────────────────────
-                        Truck, driver and visible margin are all PER TRIP, so
-                        the trip count multiplies them. Nothing from the goods
-                        section appears here. */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                      <span className="text-[10px] text-cyan-400 font-bold block">{T.form.logisticsTitle}</span>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.truckHire}</label>
-                          <input
-                            type="number"
-                            required
-                            value={resaleForm.truckCost}
-                            onChange={e => setResaleForm(p => ({ ...p, truckCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.resaleDriverCost}</label>
-                          <input
-                            type="number"
-                            required
-                            value={resaleForm.driverCost}
-                            onChange={e => setResaleForm(p => ({ ...p, driverCost: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.explicitMargin}</label>
-                          <input
-                            type="number"
-                            required
-                            value={resaleForm.explicitProfit}
-                            onChange={e => setResaleForm(p => ({ ...p, explicitProfit: parseInt(e.target.value) || 0 }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 items-end">
-                        <div>
-                          <label className="block text-slate-500 mb-1">{T.form.tripCount}</label>
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            required
-                            value={resaleForm.tripCount ?? 1}
-                            onChange={e => setResaleForm(p => ({ ...p, tripCount: Math.max(1, parseInt(e.target.value) || 1) }))}
-                            className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
-                          />
-                        </div>
-                        <div className="flex justify-between text-[10px] text-slate-400 pb-1">
-                          <span>{T.form.tripUnitCost}</span>
-                          <strong className="text-violet-300 font-mono">{resaleCalc.costPerTrip.toLocaleString()} {T.common.currency}</strong>
-                        </div>
-                      </div>
-
-                      <div className="pt-2 text-[10px] border-t border-slate-800 flex justify-between text-slate-400">
-                        <span>{T.form.multiTripTotal}</span>
-                        <strong className="text-violet-400 font-mono">
-                          {resaleCalc.trips} × {resaleCalc.costPerTrip.toLocaleString()} = {resaleCalc.transportTotal.toLocaleString()} {T.common.currency}
-                        </strong>
-                      </div>
-                    </div>
-
-                    {/* ── PROFIT SUMMARY ────────────────────────────────────
-                        Its own section, so neither figure can be mistaken for
-                        a goods or a transport number. */}
-                    <div className="p-3 bg-slate-950 rounded-xl border border-emerald-900/60 space-y-2">
-                      <span className="text-[10px] text-emerald-400 font-bold block">{T.form.profitSummaryTitle}</span>
-                      <div className="flex justify-between text-[10px] text-slate-400">
-                        <span>{T.form.hiddenMarginLabel}</span>
-                        <strong className="text-amber-400 font-mono">{resaleCalc.hiddenProfit.toLocaleString()} {T.common.currency}</strong>
-                      </div>
-                      <div className="pt-2 text-[11px] border-t border-slate-800 flex justify-between text-slate-300">
-                        <span className="font-bold">{T.form.trueProfitLabel}</span>
-                        <strong className="text-emerald-400 font-mono text-sm">{resaleCalc.netRealProfit.toLocaleString()} {T.common.currency}</strong>
-                      </div>
-                    </div>
-
-                    {/* ── WHAT THE CLIENT IS BILLED ─────────────────────────
-                        Derived, never typed, so the two invoice lines always
-                        add up to the amount the payment ledgers settle. */}
-                    <div className="p-3 bg-slate-900 rounded-xl border border-blue-900/60 flex justify-between items-center">
-                      <span className="text-[11px] text-blue-300 font-bold">{T.form.invoiceTotalLabel}</span>
-                      <strong className="text-blue-300 font-mono text-base">{resaleCalc.invoiceTotal.toLocaleString()} {T.common.currency}</strong>
-                    </div>
-
-                    {/* Note: Payment tracking (المدفوعات) is now managed via the Client Accounts and Driver Accounts tabs */}
-                  </div>
-                )}
-
-                {modalRecordType === "expenses" && (
-                  <div className="space-y-3 text-xs">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.expenseId}</label>
-                        <input
-                          type="text"
-                          required
-                          disabled={modalType === "edit"}
-                          value={expenseForm.id}
-                          onChange={e => setExpenseForm(p => ({ ...p, id: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.date}</label>
-                        <input
-                          type="date"
-                          required
-                          value={expenseForm.date}
-                          onChange={e => setExpenseForm(p => ({ ...p, date: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 mb-1">{T.form.expenseCategory}</label>
-                      <select
-                        value={expenseForm.category}
-                        onChange={e => setExpenseForm(p => ({ ...p, category: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                      >
-                        {EXPENSE_CATEGORIES.map(cat => (
-                          <option key={cat.value} value={cat.value}>{cat.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 mb-1">{T.form.truckPlate}</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder={T.form.truckPlatePlaceholder}
-                        value={expenseForm.truckPlate}
-                        onChange={e => setExpenseForm(p => ({ ...p, truckPlate: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100 font-mono"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.expenseAmount}</label>
-                        <input
-                          type="number"
-                          required
-                          value={expenseForm.amount}
-                          onChange={e => setExpenseForm(p => ({ ...p, amount: parseInt(e.target.value) || 0 }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100 font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1">{T.form.expenseStatus}</label>
-                        <select
-                          value={expenseForm.status}
-                          onChange={e => setExpenseForm(p => ({ ...p, status: e.target.value as 'Paid' | 'Pending' }))}
-                          className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
-                        >
-                          <option value="Paid">{T.expenses.statusPaid}</option>
-                          <option value="Pending">{T.expenses.statusPendingLong}</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition"
-                  >
-                    {T.form.cancel}
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-600/10 transition"
-                  >
-                    {T.form.save}
-                  </button>
-                </div>
-
-              </form>
-            </motion.div>
-          </div>
+          <EntryModal
+            key={modalNonce}
+            recordType={modalRecordType}
+            mode={modalType}
+            initial={modalInitial}
+            fallbackIds={modalRecordType === "transport" ? clientTrips.map(t => t.id) : modalRecordType === "resale" ? resaleTxs.map(t => t.id) : expenses.map(e => e.id)}
+            onSubmit={handleModalSubmit}
+            onClose={() => setIsModalOpen(false)}
+          />
         )}
-      </AnimatePresence>
 
       {/* RENDER MODAL: BILINGUAL RECEIPT VIEW & TRIGGER Browser PRINT */}
-      <AnimatePresence>
         {isReceiptOpen && selectedReceipt && (
-          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="paper-surface bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative"
-            >
+          <div className="no-print fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex dialog-scroll justify-center p-4">
+            <div className="paper-surface bg-white text-slate-900 border border-slate-200 max-w-3xl w-full rounded-2xl p-6 shadow-2xl relative">
 
               <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4 no-print">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
@@ -2568,7 +1842,7 @@ export default function App() {
                     <span>{T.receiptPreview.printButton}</span>
                   </button>
                   <button
-                    onClick={() => setIsReceiptOpen(false)}
+                    onClick={() => { setIsReceiptOpen(false); setSelectedReceipt(null); }}
                     className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full cursor-pointer"
                   >
                     <X className="h-4 w-4" />
@@ -2608,22 +1882,17 @@ export default function App() {
                         <span>{T.receiptPreview.costSheetTitle}</span>
                         <span className="text-[9px] text-slate-400">{T.receiptPreview.currencyNote}</span>
                       </h4>
+                      {/* One priced line. The driver's wage and the company's
+                          margin come out of this figure and are no business of
+                          the client's, so they are not on their invoice. */}
                       <div className="flex justify-between py-1 text-slate-600">
                         <span>{T.receiptPreview.truckHire}</span>
-                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.driverWage}</span>
-                        <span className="font-mono">{selectedReceipt.data.driverCut.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.companyProfit}</span>
-                        <span className="font-mono text-cyan-800 font-bold">+{selectedReceipt.data.companyProfit.toLocaleString()} {T.common.currency}</span>
+                        <span className="font-mono">{tripClientFee(selectedReceipt.data).toLocaleString()} {T.common.currency}</span>
                       </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900 bg-slate-105">
                         <span>{T.receiptPreview.invoiceTotal}</span>
                         <span className="font-mono text-emerald-600 text-sm">
-                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit).toLocaleString()} {T.common.currency}
+                          {tripClientFee(selectedReceipt.data).toLocaleString()} {T.common.currency}
                         </span>
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
@@ -2633,12 +1902,8 @@ export default function App() {
                       <div className="flex justify-between py-1 font-bold">
                         <span className="text-slate-800">{T.receiptPreview.clientRemaining}</span>
                         <span className="font-mono text-amber-700">
-                          {(selectedReceipt.data.truckCost + selectedReceipt.data.driverCut + selectedReceipt.data.companyProfit - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} {T.common.currency}
+                          {(tripClientFee(selectedReceipt.data) - (selectedReceipt.data.clientPaid || 0)).toLocaleString()} {T.common.currency}
                         </span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
-                        <span>{T.receiptPreview.driverPaidLine(selectedReceipt.data.driverName || T.receiptPreview.unknownDriver)}</span>
-                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCut.toLocaleString()} {T.common.currency}</span>
                       </div>
                     </div>
                   </div>
@@ -2659,38 +1924,38 @@ export default function App() {
                         <span>{T.receiptPreview.pricingAnalysisTitle}</span>
                         <span className="text-[10px] text-slate-400 font-mono">{T.receiptPreview.recordNoLabel} {selectedReceipt.data.id}</span>
                       </h4>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.truckHireLong}</span>
-                        <span className="font-mono">{selectedReceipt.data.truckCost.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.driverWage}</span>
-                        <span className="font-mono">{selectedReceipt.data.driverCost.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      {/* Internal sheet, so the real per-trip arithmetic is
-                          shown here: trips x (truck + driver + profit). */}
+                      {/* Internal sheet, so the per-trip arithmetic is spelled
+                          out — all of it from the shared resale math, never
+                          re-derived here. */}
                       {(() => {
-                        const trips = Math.max(1, selectedReceipt.data.tripCount || 1);
-                        const perTrip = selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit;
+                        const m = calcResale(selectedReceipt.data);
                         return (
-                          <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100 pt-2">
-                            <span>{T.receiptPreview.tripCountLabel}</span>
-                            <span className="font-mono">
-                              {trips} × {perTrip.toLocaleString()} {T.common.currency} = {(trips * perTrip).toLocaleString()} {T.common.currency}
-                            </span>
-                          </div>
+                          <>
+                            <div className="flex justify-between py-1 text-slate-600">
+                              <span>{T.receiptPreview.truckHireLong}</span>
+                              <span className="font-mono">{m.costPerTrip.toLocaleString()} {T.common.currency}</span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600">
+                              <span>{T.receiptPreview.driverWage}</span>
+                              <span className="font-mono">{(selectedReceipt.data.driverCost || 0).toLocaleString()} {T.common.currency}</span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100 pt-2">
+                              <span>{T.receiptPreview.tripCountLabel}</span>
+                              <span className="font-mono">
+                                {m.trips} × {m.costPerTrip.toLocaleString()} {T.common.currency} = {m.transportTotal.toLocaleString()} {T.common.currency}
+                              </span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600">
+                              <span>{T.receiptPreview.explicitTransportMargin}</span>
+                              <span className="font-mono text-slate-700">+{m.marginPerTrip.toLocaleString()} {T.common.currency}</span>
+                            </div>
+                            <div className="flex justify-between py-1 text-slate-600 font-bold bg-emerald-50 px-2 rounded">
+                              <span className="text-emerald-800">{T.receiptPreview.netRealProfit}</span>
+                              <span className="font-mono text-emerald-700">{m.netRealProfit.toLocaleString()} {T.common.currency}</span>
+                            </div>
+                          </>
                         );
                       })()}
-                      <div className="flex justify-between py-1 text-slate-600">
-                        <span>{T.receiptPreview.explicitTransportMargin}</span>
-                        <span className="font-mono text-slate-700">+{selectedReceipt.data.explicitProfit.toLocaleString()} {T.common.currency}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-slate-600 font-bold bg-amber-50 px-2 rounded">
-                        <span className="text-amber-800">{T.receiptPreview.hiddenProfit}</span>
-                        <span className="font-mono text-amber-700">
-                          {+(selectedReceipt.data.clientSellingPrice - ((selectedReceipt.data.factoryPurchasePrice * selectedReceipt.data.totalTonnage) + selectedReceipt.data.truckCost + selectedReceipt.data.driverCost + selectedReceipt.data.explicitProfit)).toLocaleString()} {T.common.currency}
-                        </span>
-                      </div>
                       <div className="flex justify-between py-1.5 border-t border-slate-200 font-extrabold text-slate-900">
                         <span>{T.receiptPreview.finalSellingTotal}</span>
                         <span className="font-mono text-emerald-600 text-sm">
@@ -2709,7 +1974,7 @@ export default function App() {
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
                         <span>{T.receiptPreview.driverPaidLine(selectedReceipt.data.driverName || T.receiptPreview.unknownDriver)}</span>
-                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCost.toLocaleString()} {T.common.currency}</span>
+                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {(calcResale(selectedReceipt.data).trips * selectedReceipt.data.driverCost).toLocaleString()} {T.common.currency}</span>
                       </div>
                     </div>
                   </div>
@@ -2734,7 +1999,7 @@ export default function App() {
 
               <div className="mt-4 flex justify-end gap-2.5 no-print">
                 <button
-                  onClick={() => setIsReceiptOpen(false)}
+                  onClick={() => { setIsReceiptOpen(false); setSelectedReceipt(null); }}
                   className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-900 rounded-lg text-xs font-semibold cursor-pointer"
                 >
                   {T.receiptPreview.close}
@@ -2747,10 +2012,9 @@ export default function App() {
                 </button>
               </div>
 
-            </motion.div>
+            </div>
           </div>
         )}
-      </AnimatePresence>
 
     </div>
   );

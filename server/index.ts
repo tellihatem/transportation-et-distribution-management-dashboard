@@ -27,12 +27,18 @@ import resalesRouter from './routes/resales';
 import expensesRouter from './routes/expenses';
 import syncRouter from './routes/sync';
 import backupRouter from './routes/backup';
+import ledgerAuditRouter from './routes/ledger-audit';
 import clientPaymentsRouter from './routes/client-payments';
 import driverPaymentsRouter from './routes/driver-payments';
 import { supplierPaymentsRouter, supplierInvoicesRouter } from './routes/suppliers';
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3001', 10);
+// The port to try first. The dev frontend proxies to 3001, so that stays the
+// preference — but it is only a preference: see startServer().
+const PREFERRED_PORT = parseInt(process.env.PORT || '3001', 10);
+
+/** The port actually bound. 0 until the server is listening. */
+let boundPort = 0;
 
 let httpServer: import('http').Server | null = null;
 let syncInterval: NodeJS.Timeout | null = null;
@@ -172,6 +178,7 @@ app.use('/api/supplier-payments', supplierPaymentsRouter);
 app.use('/api/supplier-invoices', supplierInvoicesRouter);
 app.use('/api/sync', syncRouter);
 app.use('/api/backup', backupRouter);
+app.use('/api/health/ledger-audit', ledgerAuditRouter);
 
 // --- Serve React Frontend (Electron/Production mode) ---
 // Resolved relative to this compiled module (dist-server/index.js), not
@@ -192,33 +199,66 @@ if (fs.existsSync(distPath)) {
 app.use(errorHandler);
 
 // --- Start Server Function ---
+/**
+ * Bind one port, resolving with the port actually taken, or reject.
+ *
+ * Port 0 asks the operating system for any free port, which is what makes the
+ * retry in startServer() always succeed.
+ */
+function listenOn(port: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, '0.0.0.0', () => {
+      httpServer = server;
+      boundPort = (server.address() as import('net').AddressInfo).port;
+      resolve(boundPort);
+    });
+    server.on('error', reject);
+  });
+}
+
+/**
+ * Start the API, and do not refuse to run because something else holds the
+ * usual port.
+ *
+ * This used to bind a fixed 3001 and give up if it was taken — by another
+ * program, or by a copy of this app that had not fully exited. All the desktop
+ * app could say was that the local server would not start, and the only cure
+ * was hunting down whatever held the port. Nothing needs the number to be
+ * 3001: Electron loads whatever port this returns.
+ */
 export function startServer(): Promise<number> {
   if (httpServer) {
-    return Promise.resolve(PORT);
+    return Promise.resolve(boundPort);
   }
 
   if (startPromise) {
     return startPromise;
   }
 
-  startPromise = new Promise((resolve, reject) => {
-    httpServer = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`[SERVER] ✅ API running on http://localhost:${PORT}`);
-      console.log(`[SERVER] 📡 Health: http://localhost:${PORT}/api/health`);
-      console.log('[SERVER] ─────────────────────────────────────────────────\n');
+  const announce = (port: number) => {
+    console.log(`[SERVER] ✅ API running on http://localhost:${port}`);
+    console.log(`[SERVER] 📡 Health: http://localhost:${port}/api/health`);
+    console.log('[SERVER] ─────────────────────────────────────────────────');
+    console.log();
+    startBackgroundSync();
+    startPromise = null;
+    return port;
+  };
 
-      startBackgroundSync();
-      resolve(PORT);
-      startPromise = null;
-    });
+  const giveUp = (error: unknown) => {
+    console.error('[SERVER] Failed to start server:', error);
+    httpServer = null;
+    startPromise = null;
+    throw error;
+  };
 
-    httpServer.on('error', (error) => {
-      console.error('[SERVER] Failed to start server:', error);
-      httpServer = null;
-      startPromise = null;
-      reject(error);
+  startPromise = listenOn(PREFERRED_PORT)
+    .then(announce)
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error?.code !== 'EADDRINUSE') return giveUp(error);
+      console.warn(`[SERVER] Port ${PREFERRED_PORT} is in use; asking the system for a free one.`);
+      return listenOn(0).then(announce).catch(giveUp);
     });
-  });
 
   return startPromise;
 }
@@ -245,12 +285,22 @@ export async function stopServer(): Promise<void> {
   closeDatabase();
 }
 
-// Auto-start if run directly
+// Auto-start if run directly — including when Electron forks this file as a
+// utilityProcess. In that case process.parentPort exists, and the parent is
+// waiting to hear which port was bound (or why binding failed) before it
+// loads the window. Plain `node dist-server/index.js` has no parentPort and
+// behaves exactly as before.
 if (typeof require !== 'undefined' && require.main === module) {
-  startServer().catch((error) => {
-    console.error('[SERVER] Unhandled startup error:', error);
-    process.exitCode = 1;
-  });
+  const parentPort = (process as any).parentPort;
+  startServer()
+    .then((port) => {
+      parentPort?.postMessage({ type: 'server-listening', port });
+    })
+    .catch((error) => {
+      console.error('[SERVER] Unhandled startup error:', error);
+      parentPort?.postMessage({ type: 'server-failed', message: String(error?.message || error) });
+      process.exitCode = 1;
+    });
 }
 
 export default app;

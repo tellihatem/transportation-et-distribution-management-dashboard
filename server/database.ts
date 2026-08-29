@@ -254,4 +254,26 @@ export function runMigrations(): void {
 // and are only ever filled by the operator, by a backup import, or by a cloud
 // restore. Records must never appear on their own.
 
+/**
+ * Compile-once statement cache.
+ *
+ * better-sqlite3 has no internal cache: every db.prepare() is a fresh
+ * sqlite3_prepare_v2 compile whose native handle lives until V8 collects the
+ * wrapper. The hot ledger paths prepare the same handful of SQL strings
+ * inside per-party loops on every request — and this server shares the
+ * Electron main thread, so compile time is keystroke latency. Statements are
+ * cached by their exact SQL text; better-sqlite3 statements are reusable and
+ * this process is single-threaded, so sharing them is safe.
+ */
+const stmtCache = new Map<string, any>();
+
+export function cachedStmt(sql: string): ReturnType<typeof db.prepare<unknown[]>> {
+  let stmt = stmtCache.get(sql);
+  if (!stmt) {
+    stmt = db.prepare(sql);
+    stmtCache.set(sql, stmt);
+  }
+  return stmt;
+}
+
 export default db;

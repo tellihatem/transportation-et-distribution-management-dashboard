@@ -122,38 +122,42 @@ export function SupplierAccountsTab({
     notes: '',
   });
 
-  const openPaymentForSupplier = async (supplierName: string) => {
-    try {
-      const nextId = await fetchNextSupplierPaymentId();
-      setPaymentForm(prev => ({
-        ...prev,
-        id: nextId,
-        supplierName,
-        date: new Date().toISOString().split('T')[0],
-        amount: 100000,
-        paymentType: T.supplierAccounts.paymentTypeRepay,
-        allocationMode: 'auto'
-      }));
-      setIsPaymentModalOpen(true);
-    } catch (e) {
-      console.error('Failed to get next supplier payment ID:', e);
-    }
+  const openPaymentForSupplier = (supplierName: string) => {
+    // The dialog opens IMMEDIATELY; the receipt number fills in when the
+    // server answers (submitting with it still empty is fine — the server
+    // generates one). Awaiting it before opening made the button look dead
+    // whenever the server was busy.
+    setPaymentForm(prev => ({
+      ...prev,
+      id: '',
+      supplierName,
+      date: new Date().toISOString().split('T')[0],
+      amount: 100000,
+      paymentType: T.supplierAccounts.paymentTypeRepay,
+      allocationMode: 'auto'
+    }));
+    setIsPaymentModalOpen(true);
+    fetchNextSupplierPaymentId()
+      .then(nextId => setPaymentForm(prev => (prev.id === '' ? { ...prev, id: nextId } : prev)))
+      .catch(e => console.error('Failed to get next supplier payment ID:', e));
   };
 
-  const openInvoiceForSupplier = async (supplierName: string) => {
-    try {
-      const nextId = await fetchNextSupplierInvoiceId();
-      setInvoiceForm({
-        id: nextId,
-        date: new Date().toISOString().split('T')[0],
-        supplierName,
-        amount: 50000,
-        notes: '',
-      });
-      setIsInvoiceModalOpen(true);
-    } catch (e) {
-      console.error('Failed to get next supplier invoice ID:', e);
-    }
+  const openInvoiceForSupplier = (supplierName: string) => {
+    // The dialog opens IMMEDIATELY; the receipt number fills in when the
+    // server answers (submitting with it still empty is fine — the server
+    // generates one). Awaiting it before opening made the button look dead
+    // whenever the server was busy.
+    setInvoiceForm({
+      id: '',
+      date: new Date().toISOString().split('T')[0],
+      supplierName,
+      amount: 50000,
+      notes: '',
+    });
+    setIsInvoiceModalOpen(true);
+    fetchNextSupplierInvoiceId()
+      .then(nextId => setInvoiceForm(prev => (prev.id === '' ? { ...prev, id: nextId } : prev)))
+      .catch(e => console.error('Failed to get next supplier invoice ID:', e));
   };
 
   /**
@@ -376,6 +380,27 @@ export function SupplierAccountsTab({
     );
   }, [summaries]);
 
+
+  /** Print with the party's name as the document title, so the saved PDF is
+   *  named after the statement rather than after the application. */
+  const printStatement = () => {
+    const originalTitle = document.title;
+    const party = statementData?.supplierName;
+    if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
+    let restored = false;
+    const restoreTitle = () => {
+      if (restored) return;
+      restored = true;
+      document.title = originalTitle;
+    };
+    // Electron does not always deliver afterprint (a dismissed dialog on some
+    // versions) — without the fallback each print click would leak a listener
+    // and later restore a stale title.
+    window.addEventListener('afterprint', restoreTitle, { once: true });
+    setTimeout(restoreTitle, 120000);
+    window.print();
+  };
+
   return (
     <div className="space-y-6 dir-rtl">
       {/* Top Metrics Banner */}
@@ -556,7 +581,7 @@ export function SupplierAccountsTab({
 
       {/* RECORD PAYMENT MODAL */}
       {isPaymentModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-cyan-400 font-bold text-lg">
@@ -707,7 +732,7 @@ export function SupplierAccountsTab({
 
       {/* RECORD DEBT/INVOICE MODAL */}
       {isInvoiceModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
@@ -810,7 +835,7 @@ export function SupplierAccountsTab({
           The manual drawdown: pick a delivery, take its cost off the advance
           the supplier is holding. */}
       {isDeductModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-blue-900/70 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-blue-300 font-bold text-lg">
@@ -917,7 +942,7 @@ export function SupplierAccountsTab({
       {/* CORRECT A RECORDED SUPPLIER PAYMENT
           Above the statement (z-60) because it is opened from inside it. */}
       {editingId && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
@@ -1070,7 +1095,7 @@ export function SupplierAccountsTab({
       {/* CORRECT A RECORDED DEBT/INVOICE
           Above the statement (z-60) because it is opened from inside it. */}
       {editingInvoiceId && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
@@ -1169,7 +1194,7 @@ export function SupplierAccountsTab({
 
       {/* STATEMENT MODAL */}
       {isStatementModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex dialog-scroll justify-center p-4 no-print">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-800/80">
               <div className="flex items-center gap-2 text-cyan-400 font-bold text-lg">
@@ -1178,7 +1203,7 @@ export function SupplierAccountsTab({
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => window.print()}
+                  onClick={printStatement}
                   className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1"
                 >
                   <Printer className="w-4 h-4" />

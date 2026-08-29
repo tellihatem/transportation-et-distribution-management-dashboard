@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, utilityProcess } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -10,7 +10,7 @@ const serverEntry = path.join(projectRoot, 'dist-server', 'index.js');
 const errorPage = path.join(__dirname, 'error.html');
 
 let mainWindow = null;
-let serverModule = null;
+let serverProcess = null;
 let isQuitting = false;
 
 // One instance only. Two copies racing the same database file could
@@ -81,23 +81,64 @@ function loadEnvConfig() {
 
 loadEnvConfig();
 
-function getServerApi(mod) {
-  return mod?.startServer ? mod : mod?.default ?? {};
+// Last-resort visibility. Under Electron's Node an unhandled rejection kills
+// the process; at minimum the reason must land in the support log first.
+process.on('unhandledRejection', (reason) => {
+  console.error('[MAIN] Unhandled rejection:', reason);
+  try { writeCrashLog(reason); } catch { /* logging must never throw */ }
+});
+process.on('uncaughtException', (error) => {
+  console.error('[MAIN] Uncaught exception:', error);
+  try { writeCrashLog(error); } catch { /* logging must never throw */ }
+});
+
+/**
+ * Write a startup/runtime failure where support can find it, and return the
+ * log path ('' if userData was unwritable).
+ */
+function writeCrashLog(error) {
+  const details = [
+    `time     : ${new Date().toISOString()}`,
+    `version  : ${app.getVersion()} (packaged: ${app.isPackaged})`,
+    `database : ${process.env.DATABASE_PATH || '(unset)'}`,
+    `userData : ${app.getPath('userData')}`,
+    '',
+    String(error?.stack || error),
+  ].join(String.fromCharCode(10));
+  try {
+    const logPath = path.join(app.getPath('userData'), 'startup-error.log');
+    fs.writeFileSync(logPath, details, 'utf-8');
+    return logPath;
+  } catch {
+    return '';
+  }
 }
 
-async function loadServerModule() {
-  if (!fs.existsSync(serverEntry)) {
-    throw new Error(`Server script not found at ${serverEntry}. Did you build the server?`);
+/** Show the error page with the failure's details on it. */
+async function showErrorPage(error) {
+  const logPath = writeCrashLog(error);
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = new BrowserWindow({ width: 760, height: 560, show: false });
   }
-
-  if (!serverModule) {
-    serverModule = await import(pathToFileURL(serverEntry).href);
-  }
-
-  return getServerApi(serverModule);
+  await mainWindow
+    .loadFile(errorPage, {
+      query: { message: String(error?.message || error), log: logPath },
+    })
+    .catch(() => {});
+  mainWindow.show();
 }
 
-async function startBackend() {
+/**
+ * Start the API server in its own utilityProcess.
+ *
+ * The server used to be imported in-process, which put every synchronous
+ * SQLite statement on the Electron main thread — the thread Windows routes
+ * keyboard input through. Under load the page kept painting while keystrokes
+ * queued, which read as the app "freezing until Ctrl+R". In a child process,
+ * no amount of SQL can delay input again. The child posts { port } when it is
+ * listening (server/index.ts), and the port-fallback behaviour is unchanged.
+ */
+function startBackend() {
   if (!process.env.DATABASE_PATH) {
     // logistics.v2.db — deliberately NOT the historical logistics.db.
     //
@@ -121,23 +162,75 @@ async function startBackend() {
   console.log(`[MAIN] userData: ${app.getPath('userData')}`);
   console.log(`[MAIN] database: ${process.env.DATABASE_PATH}`);
 
-  const { startServer } = await loadServerModule();
-  if (typeof startServer !== 'function') {
-    throw new Error('Compiled server module does not export startServer().');
+  if (!fs.existsSync(serverEntry)) {
+    return Promise.reject(new Error(`Server script not found at ${serverEntry}. Did you build the server?`));
   }
 
-  return startServer();
+  return new Promise((resolve, reject) => {
+    const child = utilityProcess.fork(serverEntry, [], {
+      serviceName: 'logistics-api',
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        DATABASE_PATH: process.env.DATABASE_PATH,
+        APP_VERSION: process.env.APP_VERSION,
+      },
+    });
+    serverProcess = child;
+
+    let settled = false;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+
+    // A server that says nothing within this window is stuck, not slow —
+    // even a cold first boot (migrations included) finishes in seconds.
+    const timer = setTimeout(
+      () => settle(reject, new Error('The local server did not report a port within 30s.')),
+      30000
+    );
+
+    child.on('message', (msg) => {
+      if (msg && msg.type === 'server-listening') {
+        console.log(`[MAIN] server child pid ${child.pid} listening on port ${msg.port}`);
+        settle(resolve, msg.port);
+      } else if (msg && msg.type === 'server-failed') {
+        settle(reject, new Error(msg.message || 'The local server failed to start.'));
+      }
+    });
+
+    child.on('exit', (code) => {
+      serverProcess = null;
+      // Exit before the port message is a startup failure (the reject reaches
+      // createWindow's caller, which shows the error page). Exit afterwards,
+      // while the app is running, means the backend died under the window —
+      // surface that instead of leaving every request to time out.
+      const startedBeforeExit = settled;
+      settle(reject, new Error(`The local server exited with code ${code} before starting.`));
+      if (startedBeforeExit && !isQuitting) {
+        const error = new Error(`The local server process exited unexpectedly (code ${code}).`);
+        console.error('[MAIN]', error.message);
+        void showErrorPage(error);
+      }
+    });
+  });
 }
 
 async function stopBackend() {
-  if (!serverModule) {
-    return;
-  }
-
-  const api = getServerApi(serverModule);
-  if (typeof api.stopServer === 'function') {
-    await api.stopServer();
-  }
+  const child = serverProcess;
+  if (!child) return;
+  serverProcess = null;
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 3000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill();
+  });
 }
 
 async function createWindow() {
@@ -155,6 +248,12 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // Chromium throttles timers and animation frames in a window it thinks
+      // nobody is looking at — minimised, fully covered by another window, or
+      // on a machine that has gone to sleep. This is a dashboard someone
+      // leaves open all day behind other windows, and coming back to a page
+      // whose timers stopped is how it ends up feeling stuck. Keep it running.
+      backgroundThrottling: false,
     },
   });
 
@@ -180,6 +279,10 @@ async function quitApp() {
   isQuitting = true;
   try {
     await stopBackend();
+  } catch (error) {
+    // Quitting must never be blocked by a shutdown error, but it must not
+    // escape as an unhandled rejection either.
+    console.error('[MAIN] stopBackend failed during quit:', error);
   } finally {
     app.quit();
   }
@@ -192,19 +295,17 @@ app.whenReady().then(async () => {
     await createWindow();
   } catch (error) {
     console.error('Failed to start local server:', error);
-    // The backend starts BEFORE the window is created, so a database error
-    // means no window exists yet — without this the app would keep running
-    // invisibly with nothing on screen and no way to see what went wrong.
-    if (!mainWindow) {
-      mainWindow = new BrowserWindow({ width: 700, height: 500, show: false });
-    }
-    await mainWindow.loadFile(errorPage).catch(() => {});
-    mainWindow.show();
+    // The backend starts BEFORE the window is created, so a failure here may
+    // mean no window exists yet — showErrorPage creates one and puts the
+    // reason on screen plus into startup-error.log for support.
+    await showErrorPage(error);
   }
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      await createWindow();
+      // Without the catch, a rejection here escapes the event handler and —
+      // with no process-level handler — kills the whole app silently.
+      await createWindow().catch((error) => showErrorPage(error));
     }
   });
 });

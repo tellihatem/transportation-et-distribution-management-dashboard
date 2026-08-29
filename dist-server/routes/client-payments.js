@@ -10,8 +10,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
-const replicator_1 = require("../sync/replicator");
 const ledgers_1 = require("../ledgers");
+const trip_math_1 = require("../trip-math");
+const trip_math_2 = require("../trip-math");
+// NOTE deliberately no queueSync here: the payment/allocation tables are
+// local-only (no Supabase mirror). Queuing deletes for them errors into
+// sync_queue and retries forever — see server/routes/suppliers.ts for the
+// same decision documented on the supplier ledger.
 const router = (0, express_1.Router)();
 /**
  * GET /api/client-payments — List all client payments with allocations
@@ -77,42 +82,45 @@ router.get('/next-id', (0, error_handler_1.asyncHandler)(async (_req, res) => {
  */
 router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
     // Collect all distinct client names from trips, resales, and payments
-    const clientRows = database_1.default.prepare(`
-    SELECT client_name as name FROM client_trips WHERE client_name != ''
-    UNION
-    SELECT end_client as name FROM material_resales WHERE end_client != ''
-    UNION
-    SELECT client_name as name FROM client_payments WHERE client_name != ''
-  `).all();
-    const clientSummaries = clientRows.map(({ name }) => {
-        // 1. Transport Trips for client
-        const trips = database_1.default.prepare('SELECT * FROM client_trips WHERE client_name = ?').all(name);
-        let transportInvoiced = 0;
-        let transportPaid = 0;
-        trips.forEach(t => {
-            const fee = t.truck_cost + t.driver_cut + t.company_profit;
-            transportInvoiced += fee;
-            transportPaid += (t.client_paid ?? 0);
-        });
-        // 2. Material Resales for client
-        const resales = database_1.default.prepare('SELECT * FROM material_resales WHERE end_client = ?').all(name);
-        let resaleInvoiced = 0;
-        let resalePaid = 0;
-        resales.forEach(r => {
-            resaleInvoiced += r.client_selling_price;
-            resalePaid += (r.client_paid ?? 0);
-        });
-        const totalInvoiced = transportInvoiced + resaleInvoiced;
-        // 3. Client Payments recorded
-        const payments = database_1.default.prepare('SELECT * FROM client_payments WHERE client_name = ?').all(name);
-        const totalPaymentsReceived = payments.reduce((sum, p) => sum + p.amount, 0);
-        // Allocations sum
-        const totalAllocatedPaid = transportPaid + resalePaid;
+    // One aggregate per table instead of three full scans per client. This
+    // endpoint refires after every write (refreshAllData), and the server
+    // shares the Electron main thread — per-party loops here were the largest
+    // single source of the UI "freezing" as the day's data grew.
+    const tripAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT client_name as name,
+           SUM(${trip_math_1.TRIP_CLIENT_FEE_SQL}) as invoiced,
+           SUM(COALESCE(client_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(client_paid, 0) < ${trip_math_1.TRIP_CLIENT_FEE_SQL} - ${ledgers_1.MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM client_trips WHERE client_name != '' GROUP BY client_name
+  `).all())
+        tripAgg.set(r.name, r);
+    const resaleAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT end_client as name,
+           SUM(client_selling_price) as invoiced,
+           SUM(COALESCE(client_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(client_paid, 0) < client_selling_price - ${ledgers_1.MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM material_resales WHERE end_client != '' GROUP BY end_client
+  `).all())
+        resaleAgg.set(r.name, r);
+    const payAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT client_name as name, SUM(amount) as total
+    FROM client_payments WHERE client_name != '' GROUP BY client_name
+  `).all())
+        payAgg.set(r.name, r.total);
+    const names = new Set([...tripAgg.keys(), ...resaleAgg.keys(), ...payAgg.keys()]);
+    const clientSummaries = [...names].map(name => {
+        const t = tripAgg.get(name);
+        const r = resaleAgg.get(name);
+        const totalInvoiced = (t?.invoiced ?? 0) + (r?.invoiced ?? 0);
+        const totalAllocatedPaid = (t?.paid ?? 0) + (r?.paid ?? 0);
+        const totalPaymentsReceived = payAgg.get(name) ?? 0;
         const unallocatedCredit = Math.max(0, totalPaymentsReceived - totalAllocatedPaid);
         const outstandingReceivable = Math.max(0, totalInvoiced - totalAllocatedPaid);
-        const totalTripsCount = trips.length + resales.length;
-        const unpaidTripsCount = trips.filter(t => (t.client_paid ?? 0) < (t.truck_cost + t.driver_cut + t.company_profit)).length +
-            resales.filter(r => (r.client_paid ?? 0) < r.client_selling_price).length;
         return {
             clientName: name,
             totalInvoiced,
@@ -120,8 +128,8 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
             totalAllocatedPaid,
             outstandingReceivable,
             unallocatedCredit,
-            totalTripsCount,
-            unpaidTripsCount
+            totalTripsCount: (t?.cnt ?? 0) + (r?.cnt ?? 0),
+            unpaidTripsCount: (t?.unpaid ?? 0) + (r?.unpaid ?? 0),
         };
     });
     res.json({ success: true, data: clientSummaries });
@@ -136,7 +144,7 @@ router.get('/statement/:clientName', (0, error_handler_1.asyncHandler)(async (re
     const payments = database_1.default.prepare('SELECT * FROM client_payments WHERE client_name = ? ORDER BY date DESC').all(name);
     const itemizedTrips = [
         ...trips.map(t => {
-            const fee = t.truck_cost + t.driver_cut + t.company_profit;
+            const fee = (0, trip_math_2.tripClientFee)({ truckCost: t.truck_cost });
             return {
                 type: 'transport',
                 id: t.id,
@@ -221,18 +229,11 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     `).run(id, date, clientName, amount, paymentMethod || 'Cash', notes || '');
         let remainingToAllocate = amount;
         if (allocationMode === 'manual' && Array.isArray(allocations)) {
-            for (const alloc of allocations) {
-                if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0)
-                    continue;
-                const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-                if (allocAmt <= 0)
-                    break;
-                database_1.default.prepare(`
-          INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, alloc.tripType, alloc.tripId, allocAmt);
-                (0, ledgers_1.syncTripClientPaid)(alloc.tripType, alloc.tripId);
-                remainingToAllocate -= allocAmt;
+            try {
+                remainingToAllocate = (0, ledgers_1.applyManualAllocations)('client', id, clientName, remainingToAllocate, allocations);
+            }
+            catch (err) {
+                throw (0, error_handler_1.createApiError)(err.message, 400, 'VALIDATION_ERROR');
             }
         }
         else if (allocationMode === 'auto') {
@@ -242,7 +243,6 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     });
     executePaymentTx();
     const created = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(id);
-    (0, replicator_1.queueSync)('client_payments', id, 'upsert', created);
     res.status(201).json({ success: true, data: created });
 }));
 /**
@@ -258,7 +258,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Payment not found', 404, 'NOT_FOUND');
-    const { date, clientName, amount, paymentMethod, notes, allocationMode } = req.body;
+    const { date, clientName, amount, paymentMethod, notes, allocationMode, allocations } = req.body;
     if (!date || !clientName || !amount || amount <= 0) {
         throw (0, error_handler_1.createApiError)('Missing required fields: date, clientName, amount', 400, 'VALIDATION_ERROR');
     }
@@ -280,8 +280,23 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         if (allocationMode === 'auto') {
             (0, ledgers_1.allocateClientPayment)(paymentId, clientName, amount);
         }
+        else if (allocationMode === 'manual' && Array.isArray(allocations)) {
+            // Same rules as POST — an edited receipt may keep hand-placed rows
+            // rather than silently converting them into an advance.
+            try {
+                (0, ledgers_1.applyManualAllocations)('client', paymentId, clientName, amount, allocations);
+            }
+            catch (err) {
+                throw (0, error_handler_1.createApiError)(err.message, 400, 'VALIDATION_ERROR');
+            }
+        }
     });
     updateTx();
+    // Work the old allocations were covering may be unpaid again, and if the
+    // payment moved to another client, both parties' credit must resettle.
+    (0, ledgers_1.applyClientCredit)(existing.client_name);
+    if (clientName !== existing.client_name)
+        (0, ledgers_1.applyClientCredit)(clientName);
     const updated = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
     res.json({ success: true, data: updated });
 }));
@@ -308,7 +323,10 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         }
     });
     deleteTx();
-    (0, replicator_1.queueSync)('client_payments', paymentId, 'delete', null);
+    // The trips this payment covered are unpaid again. If the client holds any
+    // other unapplied credit, it belongs on them now — the same sweep every
+    // work-side write performs.
+    (0, ledgers_1.applyClientCredit)(existing.client_name);
     res.json({ success: true, message: 'Payment deleted and allocations reverted' });
 }));
 exports.default = router;

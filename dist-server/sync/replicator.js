@@ -118,32 +118,48 @@ function addToSyncQueue(tableName, recordId, operation, payload) {
 /**
  * Process all pending items in the sync queue (called by scheduler)
  */
+let queueRunInFlight = false;
 async function processSyncQueue() {
     const client = (0, supabase_client_1.getSupabaseClient)();
     if (!client)
         return { processed: 0, failed: 0 };
-    const pending = database_1.default.prepare('SELECT * FROM sync_queue WHERE retry_count < 10 ORDER BY created_at ASC LIMIT 50').all();
-    if (pending.length === 0)
+    // setInterval does not wait for an async callback. Against a slow or
+    // blackholed endpoint one pass can outlive the interval, and overlapping
+    // passes would then hammer the same unclaimed rows. One pass at a time.
+    if (queueRunInFlight)
         return { processed: 0, failed: 0 };
-    console.log(`[SYNC] Processing ${pending.length} queued items...`);
-    let processed = 0;
-    let failed = 0;
-    for (const item of pending) {
-        try {
-            const payload = item.payload ? JSON.parse(item.payload) : null;
-            await syncToSupabase(item.table_name, item.record_id, item.operation, payload);
-            // Success — remove from queue
-            database_1.default.prepare('DELETE FROM sync_queue WHERE queue_id = ?').run(item.queue_id);
-            processed++;
+    queueRunInFlight = true;
+    try {
+        // Rows that have exhausted their retries are dead: never sent again, but
+        // until now re-scanned by every tick forever. Reap them (a fresh edit of
+        // the same record re-queues it with a clean count).
+        database_1.default.prepare('DELETE FROM sync_queue WHERE retry_count >= 10').run();
+        const pending = database_1.default.prepare('SELECT * FROM sync_queue WHERE retry_count < 10 ORDER BY created_at ASC LIMIT 50').all();
+        if (pending.length === 0)
+            return { processed: 0, failed: 0 };
+        console.log(`[SYNC] Processing ${pending.length} queued items...`);
+        let processed = 0;
+        let failed = 0;
+        for (const item of pending) {
+            try {
+                const payload = item.payload ? JSON.parse(item.payload) : null;
+                await syncToSupabase(item.table_name, item.record_id, item.operation, payload);
+                // Success — remove from queue
+                database_1.default.prepare('DELETE FROM sync_queue WHERE queue_id = ?').run(item.queue_id);
+                processed++;
+            }
+            catch (error) {
+                // Failure — increment retry counter
+                database_1.default.prepare('UPDATE sync_queue SET retry_count = retry_count + 1, last_error = ? WHERE queue_id = ?').run(error?.message || 'Unknown error', item.queue_id);
+                failed++;
+            }
         }
-        catch (error) {
-            // Failure — increment retry counter
-            database_1.default.prepare('UPDATE sync_queue SET retry_count = retry_count + 1, last_error = ? WHERE queue_id = ?').run(error?.message || 'Unknown error', item.queue_id);
-            failed++;
-        }
+        console.log(`[SYNC] Queue processing complete: ${processed} synced, ${failed} failed`);
+        return { processed, failed };
     }
-    console.log(`[SYNC] Queue processing complete: ${processed} synced, ${failed} failed`);
-    return { processed, failed };
+    finally {
+        queueRunInFlight = false;
+    }
 }
 /**
  * Full push sync: sync ALL unsynced records to Supabase

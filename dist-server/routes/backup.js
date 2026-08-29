@@ -69,6 +69,10 @@ router.get('/export', (0, error_handler_1.asyncHandler)(async (_req, res) => {
     const backup = {
         version: BACKUP_VERSION,
         exportedAt: new Date().toISOString(),
+        // Which pricing-model restatements this data has been through (migrations
+        // 011/012 stamp these). Import reads them to decide whether the rows must
+        // be restated on arrival — see the import handler.
+        schemaFlags: database_1.default.prepare('SELECT key FROM schema_flags').all().map((r) => r.key),
         tables,
     };
     const filename = `logistics-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -128,6 +132,15 @@ router.post('/import', (0, error_handler_1.asyncHandler)(async (req, res) => {
         throw (0, error_handler_1.createApiError)('Import unavailable: the legacy-data filter is missing from this installation. Reinstall the application.', 500, 'PURGE_FILTER_MISSING');
     }
     const counts = {};
+    // Backups exported before migrations 011/012 hold trips and resales under
+    // the OLD pricing model (client fee = truck + wage + margin summed). This
+    // database has already been restated, so inserting those rows verbatim
+    // would silently bill every imported trip only its truck share — an
+    // invoice collapse. Old backups carry no schemaFlags field at all; newer
+    // ones list exactly which restatements their data has been through.
+    const importedFlags = Array.isArray(req.body.schemaFlags) ? req.body.schemaFlags : [];
+    const needsTripRestatement = !importedFlags.includes('trip_fee_model_v2');
+    const needsResaleRestatement = !importedFlags.includes('resale_transport_model_v2');
     const importTransaction = database_1.default.transaction(() => {
         // Clear children before parents so FK constraints are never violated.
         for (const table of [...TABLES].reverse()) {
@@ -150,6 +163,57 @@ router.post('/import', (0, error_handler_1.asyncHandler)(async (req, res) => {
             }
             counts[table] = rows.length;
         }
+        // Restate old-model rows with the exact arithmetic of migrations 011/012
+        // (all SET right-hand sides read the pre-update values, so the order of
+        // assignments does not matter). What the client owed and the driver
+        // earned are preserved; only the profit is recomputed under the new rule.
+        if (needsTripRestatement) {
+            database_1.default.prepare(`
+        UPDATE client_trips
+        SET truck_cost     = truck_cost + driver_cut + company_profit,
+            company_profit = truck_cost + company_profit,
+            updated_at     = datetime('now'), synced_at = NULL
+      `).run();
+        }
+        if (needsResaleRestatement) {
+            database_1.default.prepare(`
+        UPDATE material_resales
+        SET truck_cost      = truck_cost + driver_cost + explicit_profit,
+            explicit_profit = truck_cost + explicit_profit,
+            updated_at      = datetime('now'), synced_at = NULL
+      `).run();
+        }
+        // The paid caches are derived data. Re-derive them from the imported
+        // allocation rows instead of trusting whatever the file carried — a
+        // backup taken while a cache was inconsistent would otherwise preserve
+        // the inconsistency forever.
+        database_1.default.prepare(`
+      UPDATE client_trips SET client_paid = COALESCE((
+        SELECT SUM(amount) FROM client_payment_allocations
+        WHERE trip_type = 'transport' AND trip_id = client_trips.id), 0)
+    `).run();
+        database_1.default.prepare(`
+      UPDATE client_trips SET driver_paid = COALESCE((
+        SELECT SUM(amount) FROM driver_payment_allocations
+        WHERE trip_type = 'transport' AND trip_id = client_trips.id), 0)
+    `).run();
+        database_1.default.prepare(`
+      UPDATE material_resales SET
+        client_paid = COALESCE((
+          SELECT SUM(amount) FROM client_payment_allocations
+          WHERE trip_type = 'resale' AND trip_id = material_resales.id), 0),
+        driver_paid = COALESCE((
+          SELECT SUM(amount) FROM driver_payment_allocations
+          WHERE trip_type = 'resale' AND trip_id = material_resales.id), 0),
+        supplier_paid = COALESCE((
+          SELECT SUM(amount) FROM supplier_payment_allocations
+          WHERE target_type = 'resale' AND target_id = material_resales.id), 0)
+    `).run();
+        database_1.default.prepare(`
+      UPDATE supplier_invoices SET paid = COALESCE((
+        SELECT SUM(amount) FROM supplier_payment_allocations
+        WHERE target_type = 'invoice' AND target_id = supplier_invoices.id), 0)
+    `).run();
     });
     importTransaction();
     // A backup exported from a machine that still carried the old demo records

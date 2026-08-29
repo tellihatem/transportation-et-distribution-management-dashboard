@@ -78,21 +78,23 @@ export function ClientAccountsTab({
   });
 
   // Open Payment Modal for a specific client
-  const openPaymentForClient = async (clientName: string) => {
-    try {
-      const nextId = await fetchNextClientPaymentId();
-      setPaymentForm(prev => ({
-        ...prev,
-        id: nextId,
-        clientName,
-        date: new Date().toISOString().split('T')[0],
-        amount: 100000,
-        allocationMode: 'auto'
-      }));
-      setIsPaymentModalOpen(true);
-    } catch (e) {
-      console.error('Failed to get next payment ID:', e);
-    }
+  const openPaymentForClient = (clientName: string) => {
+    // The dialog opens IMMEDIATELY; the receipt number fills in when the
+    // server answers (submitting with it still empty is fine — the server
+    // generates one). Awaiting it before opening made the button look dead
+    // whenever the server was busy.
+    setPaymentForm(prev => ({
+      ...prev,
+      id: '',
+      clientName,
+      date: new Date().toISOString().split('T')[0],
+      amount: 100000,
+      allocationMode: 'auto'
+    }));
+    setIsPaymentModalOpen(true);
+    fetchNextClientPaymentId()
+      .then(nextId => setPaymentForm(prev => (prev.id === '' ? { ...prev, id: nextId } : prev)))
+      .catch(e => console.error('Failed to get next payment ID:', e));
   };
 
   // Open Statement Modal for a client
@@ -205,6 +207,27 @@ export function ClientAccountsTab({
       { invoiced: 0, collected: 0, receivables: 0, credit: 0 }
     );
   }, [summaries]);
+
+
+  /** Print with the party's name as the document title, so the saved PDF is
+   *  named after the statement rather than after the application. */
+  const printStatement = () => {
+    const originalTitle = document.title;
+    const party = statementData?.clientName;
+    if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
+    let restored = false;
+    const restoreTitle = () => {
+      if (restored) return;
+      restored = true;
+      document.title = originalTitle;
+    };
+    // Electron does not always deliver afterprint (a dismissed dialog on some
+    // versions) — without the fallback each print click would leak a listener
+    // and later restore a stale title.
+    window.addEventListener('afterprint', restoreTitle, { once: true });
+    setTimeout(restoreTitle, 120000);
+    window.print();
+  };
 
   return (
     <div className="space-y-6 dir-rtl">
@@ -375,7 +398,7 @@ export function ClientAccountsTab({
 
       {/* RECORD PAYMENT MODAL */}
       {isPaymentModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-emerald-400 font-bold text-lg">
@@ -528,7 +551,7 @@ export function ClientAccountsTab({
       {/* CORRECT A RECORDED RECEIPT
           Sits above the statement (z-60) because it is opened from inside it. */}
       {editingId && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex dialog-scroll justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-900/50">
               <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
@@ -681,7 +704,7 @@ export function ClientAccountsTab({
 
       {/* STATEMENT OF ACCOUNT MODAL */}
       {isStatementModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto no-print">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex dialog-scroll justify-center p-4 no-print">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl dir-rtl">
             <div className="flex items-center justify-between p-5 border-b border-slate-700 bg-slate-800/80">
               <div className="flex items-center gap-2 text-emerald-400 font-bold text-lg">
@@ -690,7 +713,7 @@ export function ClientAccountsTab({
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => window.print()}
+                  onClick={printStatement}
                   className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1"
                 >
                   <Printer className="w-4 h-4" />

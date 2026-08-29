@@ -20,7 +20,8 @@ export interface ClientTransportTrip {
   // Read-only: recomputed server-side from the payment ledgers. Never sent by forms.
   clientPaid: number;    // Amount the client has paid so far (toward the total fee)
   driverPaid: number;    // Amount paid to the driver so far (toward driverCut)
-  // Computed field: Total Transport Fee = truckCost + driverCut + companyProfit
+  // What the client owes is truckCost alone — the wage comes out of it and
+  // companyProfit is the remainder. See server/trip-math.ts.
 }
 
 // Tab 2: Material Resale Transaction Record
@@ -36,27 +37,27 @@ export interface MaterialResaleTx {
   totalTonnage: number;
   quantityUnit: string;  // Unit the quantity is measured in (طن، وحدة، متر مكعب…)
   // Invoice total billed to the client. DERIVED, not typed:
-  //   productUnitPrice × totalTonnage  +  tripCount × (truckCost + driverCost + explicitProfit)
+  //   productUnitPrice × totalTonnage  +  tripCount × truckCost
   // Kept as a stored field because the payment ledgers settle against it.
   clientSellingPrice: number;
-  truckCost: number;     // Truck logistics cost
-  driverCost: number;    // Driver payment
-  explicitProfit: number; // Declared profit for transport
+  truckCost: number;     // The hire: the whole transport charge, per trip
+  driverCost: number;    // Driver's wage, paid out of the hire
+  explicitProfit: number; // Derived: truckCost - driverCost. Stored, never typed.
   driverName: string;    // Which driver did the delivery
-  // How many truck trips the delivery took. Always at least 1. truckCost,
-  // driverCost and explicitProfit are all PER TRIP, so this multiplies them.
+  // How many truck trips the delivery took. Always at least 1. Every
+  // transport figure above is PER TRIP, so this multiplies them.
   tripCount: number;
   // Read-only: recomputed server-side from the payment ledgers. Never sent by forms.
   clientPaid: number;    // Amount the client has paid so far (toward clientSellingPrice)
-  driverPaid: number;    // Amount paid to the driver so far (toward driverCost)
+  driverPaid: number;    // Paid to the driver so far (toward tripCount × driverCost)
   // Computed fields (see src/resale-math.ts — one implementation, shared):
   // - Total Buy Cost       = factoryPurchasePrice * totalTonnage
   // - Total Sell Revenue   = productUnitPrice     * totalTonnage
   // - Gross Product Profit = Total Sell Revenue - Total Buy Cost
-  // - Cost Per Trip        = truckCost + driverCost + explicitProfit
-  // - Transport Total      = tripCount * Cost Per Trip
-  // - Hidden Profit        = Gross Product Profit - Transport Total
-  // - Net Real Profit      = Hidden Profit + tripCount * explicitProfit
+  // - Cost Per Trip        = truckCost (the hire, whole)
+  // - Transport Total      = tripCount * Cost Per Trip (billed to the client)
+  // - Net Real Profit      = Gross Product Profit + tripCount * (truckCost - driverCost)
+  //   (transport is client-paid revenue, so it is never deducted from profit)
   // - Invoice Total        = Total Sell Revenue + Transport Total
 }
 
@@ -193,6 +194,8 @@ export interface DriverSummary {
   totalAllocatedPaid: number;
   outstandingPayable: number;
   advanceBalance: number;
+  /** Paid beyond everything earned — the only part profit views deduct. */
+  unearnedAdvance: number;
   totalTripsCount: number;
   unpaidTripsCount: number;
 }
@@ -205,6 +208,7 @@ export interface DriverStatement {
     totalAllocatedPaid: number;
     outstandingPayable: number;
     advanceBalance: number;
+    unearnedAdvance: number;
   };
   itemizedTrips: Array<{
     type: 'transport' | 'resale';
@@ -274,7 +278,9 @@ export interface SupplierSummary {
   totalPaymentsGiven: number;
   totalAllocatedPaid: number;
   outstandingDebt: number;   // max(0, owed − paid): net semantics
-  prepaidBalance: number;    // max(0, paid − owed)
+  prepaidBalance: number;    // payments − drawn down (drawdown view)
+  /** Paid beyond everything owed — the only part profit views deduct. */
+  unmatchedPrepaid: number;
   shipmentsCount: number;
   unpaidCount: number;
 }
@@ -287,6 +293,7 @@ export interface SupplierStatement {
     totalAllocatedPaid: number;
     outstandingDebt: number;
     prepaidBalance: number;
+    unmatchedPrepaid: number;
   };
   itemized: Array<{
     type: 'resale' | 'invoice';

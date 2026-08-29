@@ -10,8 +10,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
-const replicator_1 = require("../sync/replicator");
 const ledgers_1 = require("../ledgers");
+// NOTE deliberately no queueSync here: the payment/allocation tables are
+// local-only (no Supabase mirror). Queuing deletes for them errors into
+// sync_queue and retries forever — see server/routes/suppliers.ts for the
+// same decision documented on the supplier ledger.
 const router = (0, express_1.Router)();
 /**
  * What a driver is owed for one resale.
@@ -88,42 +91,48 @@ router.get('/next-id', (0, error_handler_1.asyncHandler)(async (_req, res) => {
  * GET /api/driver-payments/summary — Summary statistics for all drivers
  */
 router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
-    const driverRows = database_1.default.prepare(`
-    SELECT driver_name as name FROM client_trips WHERE driver_name != ''
-    UNION
-    SELECT driver_name as name FROM material_resales WHERE driver_name != ''
-    UNION
-    SELECT driver_name as name FROM driver_payments WHERE driver_name != ''
-  `).all();
-    const driverSummaries = driverRows.map(({ name }) => {
-        // 1. Transport Trips for driver
-        const trips = database_1.default.prepare('SELECT * FROM client_trips WHERE driver_name = ?').all(name);
-        let transportEarned = 0;
-        let transportPaid = 0;
-        trips.forEach(t => {
-            transportEarned += t.driver_cut;
-            transportPaid += (t.driver_paid ?? 0);
-        });
-        // 2. Material Resales for driver
-        const resales = database_1.default.prepare('SELECT * FROM material_resales WHERE driver_name = ?').all(name);
-        let resaleEarned = 0;
-        let resalePaid = 0;
-        // driver_cost is the wage for ONE trip, so a multi-trip delivery earns
-        // that wage once per trip.
-        resales.forEach(r => {
-            resaleEarned += resaleDriverWage(r);
-            resalePaid += (r.driver_paid ?? 0);
-        });
-        const totalEarned = transportEarned + resaleEarned;
-        // 3. Driver Payments recorded
-        const payments = database_1.default.prepare('SELECT * FROM driver_payments WHERE driver_name = ?').all(name);
-        const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
-        const totalAllocatedPaid = transportPaid + resalePaid;
+    // Aggregate per table instead of three full scans per driver — same
+    // rationale as the client summary: this refires on every write and runs on
+    // the Electron main thread.
+    const tripAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT driver_name as name,
+           SUM(driver_cut) as earned,
+           SUM(COALESCE(driver_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(driver_paid, 0) < driver_cut - ${ledgers_1.MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM client_trips WHERE driver_name != '' GROUP BY driver_name
+  `).all())
+        tripAgg.set(r.name, r);
+    const resaleAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT driver_name as name,
+           SUM(${ledgers_1.RESALE_DRIVER_WAGE_SQL}) as earned,
+           SUM(COALESCE(driver_paid, 0)) as paid,
+           COUNT(*) as cnt,
+           SUM(CASE WHEN COALESCE(driver_paid, 0) < ${ledgers_1.RESALE_DRIVER_WAGE_SQL} - ${ledgers_1.MONEY_EPSILON} THEN 1 ELSE 0 END) as unpaid
+    FROM material_resales WHERE driver_name != '' GROUP BY driver_name
+  `).all())
+        resaleAgg.set(r.name, r);
+    const payAgg = new Map();
+    for (const r of database_1.default.prepare(`
+    SELECT driver_name as name, SUM(amount) as total
+    FROM driver_payments WHERE driver_name != '' GROUP BY driver_name
+  `).all())
+        payAgg.set(r.name, r.total);
+    const names = new Set([...tripAgg.keys(), ...resaleAgg.keys(), ...payAgg.keys()]);
+    const driverSummaries = [...names].map(name => {
+        const t = tripAgg.get(name);
+        const r = resaleAgg.get(name);
+        const totalEarned = (t?.earned ?? 0) + (r?.earned ?? 0);
+        const totalAllocatedPaid = (t?.paid ?? 0) + (r?.paid ?? 0);
+        const totalPaymentsGiven = payAgg.get(name) ?? 0;
+        // Not yet applied to any trip — the figure the drawdown views track.
         const advanceBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-        const outstandingPayable = Math.max(0, totalEarned - totalPaymentsGiven);
-        const totalTripsCount = trips.length + resales.length;
-        const unpaidTripsCount = trips.filter(t => (t.driver_paid ?? 0) < t.driver_cut).length +
-            resales.filter(r => (r.driver_paid ?? 0) < resaleDriverWage(r)).length;
+        // Paid beyond everything EARNED — the only part the profit views deduct.
+        const unearnedAdvance = Math.max(0, totalPaymentsGiven - totalEarned);
+        // Work done and not settled, allocation basis like the other ledgers.
+        const outstandingPayable = Math.max(0, totalEarned - totalAllocatedPaid);
         return {
             driverName: name,
             totalEarned,
@@ -131,8 +140,9 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
             totalAllocatedPaid,
             outstandingPayable,
             advanceBalance,
-            totalTripsCount,
-            unpaidTripsCount
+            unearnedAdvance,
+            totalTripsCount: (t?.cnt ?? 0) + (r?.cnt ?? 0),
+            unpaidTripsCount: (t?.unpaid ?? 0) + (r?.unpaid ?? 0),
         };
     });
     res.json({ success: true, data: driverSummaries });
@@ -177,7 +187,8 @@ router.get('/statement/:driverName', (0, error_handler_1.asyncHandler)(async (re
     const totalAllocatedPaid = itemizedTrips.reduce((sum, item) => sum + item.driverPaid, 0);
     const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
     const advanceBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-    const outstandingPayable = Math.max(0, totalEarned - totalPaymentsGiven);
+    const unearnedAdvance = Math.max(0, totalPaymentsGiven - totalEarned);
+    const outstandingPayable = Math.max(0, totalEarned - totalAllocatedPaid);
     res.json({
         success: true,
         data: {
@@ -187,7 +198,8 @@ router.get('/statement/:driverName', (0, error_handler_1.asyncHandler)(async (re
                 totalPaymentsGiven,
                 totalAllocatedPaid,
                 outstandingPayable,
-                advanceBalance
+                advanceBalance,
+                unearnedAdvance
             },
             itemizedTrips,
             payments: payments.map(p => ({
@@ -228,18 +240,11 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     `).run(id, date, driverName, amount, paymentType || 'Settlement', notes || '');
         let remainingToAllocate = amount;
         if (allocationMode === 'manual' && Array.isArray(allocations)) {
-            for (const alloc of allocations) {
-                if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0)
-                    continue;
-                const allocAmt = Math.min(alloc.amount, remainingToAllocate);
-                if (allocAmt <= 0)
-                    break;
-                database_1.default.prepare(`
-          INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
-          VALUES (?, ?, ?, ?)
-        `).run(id, alloc.tripType, alloc.tripId, allocAmt);
-                (0, ledgers_1.syncTripDriverPaid)(alloc.tripType, alloc.tripId);
-                remainingToAllocate -= allocAmt;
+            try {
+                remainingToAllocate = (0, ledgers_1.applyManualAllocations)('driver', id, driverName, remainingToAllocate, allocations);
+            }
+            catch (err) {
+                throw (0, error_handler_1.createApiError)(err.message, 400, 'VALIDATION_ERROR');
             }
         }
         else if (allocationMode === 'auto') {
@@ -249,7 +254,6 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     });
     executePaymentTx();
     const created = database_1.default.prepare('SELECT * FROM driver_payments WHERE id = ?').get(id);
-    (0, replicator_1.queueSync)('driver_payments', id, 'upsert', created);
     res.status(201).json({ success: true, data: created });
 }));
 /**
@@ -267,7 +271,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Payment not found', 404, 'NOT_FOUND');
-    const { date, driverName, amount, paymentType, notes, allocationMode } = req.body;
+    const { date, driverName, amount, paymentType, notes, allocationMode, allocations } = req.body;
     if (!date || !driverName || !amount || amount <= 0) {
         throw (0, error_handler_1.createApiError)('Missing required fields: date, driverName, amount', 400, 'VALIDATION_ERROR');
     }
@@ -291,8 +295,21 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         if (allocationMode === 'auto') {
             (0, ledgers_1.allocateDriverPayment)(paymentId, driverName, amount);
         }
+        else if (allocationMode === 'manual' && Array.isArray(allocations)) {
+            // Same rules as POST — an edited receipt may keep hand-placed rows
+            // rather than silently converting them into an advance.
+            try {
+                (0, ledgers_1.applyManualAllocations)('driver', paymentId, driverName, amount, allocations);
+            }
+            catch (err) {
+                throw (0, error_handler_1.createApiError)(err.message, 400, 'VALIDATION_ERROR');
+            }
+        }
     });
     updateTx();
+    (0, ledgers_1.applyDriverAdvance)(existing.driver_name);
+    if (driverName !== existing.driver_name)
+        (0, ledgers_1.applyDriverAdvance)(driverName);
     const updated = database_1.default.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId);
     res.json({ success: true, data: updated });
 }));
@@ -315,7 +332,9 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         }
     });
     deleteTx();
-    (0, replicator_1.queueSync)('driver_payments', paymentId, 'delete', null);
+    // Same sweep as on the client side: freed wages resettle from any other
+    // credit the driver still holds.
+    (0, ledgers_1.applyDriverAdvance)(existing.driver_name);
     res.json({ success: true, message: 'Driver payout deleted and allocations reverted' });
 }));
 exports.default = router;

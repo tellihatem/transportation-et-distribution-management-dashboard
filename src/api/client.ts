@@ -14,16 +14,30 @@ interface ApiResponse<T> {
 }
 
 /**
- * Generic fetch wrapper with error handling
+ * Generic fetch wrapper with error handling.
+ *
+ * Every request carries a hard timeout. Without one, a stalled server let
+ * requests pile up unboundedly behind the browser's per-host connection
+ * limit — the backlog only a full reload could clear. A caller may pass its
+ * own AbortSignal (the list hooks do, to cancel superseded searches); it is
+ * combined with the timeout so either can end the request.
  */
+const REQUEST_TIMEOUT_MS = 20000;
+
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${BASE_URL}${endpoint}`;
+
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = options?.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
 
   const res = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
     },
     ...options,
+    signal,
   });
 
   const json: ApiResponse<T> = await res.json();
@@ -70,9 +84,9 @@ export async function fetchTrips(params?: {
   search?: string;
   dateStart?: string;
   dateEnd?: string;
-}): Promise<ClientTransportTrip[]> {
+}, signal?: AbortSignal): Promise<ClientTransportTrip[]> {
   const query = buildQueryString(params);
-  return request<ClientTransportTrip[]>(`/trips${query}`);
+  return request<ClientTransportTrip[]>(`/trips${query}`, { signal });
 }
 
 export async function fetchTripStats(params?: {
@@ -121,9 +135,9 @@ export async function fetchResales(params?: {
   search?: string;
   dateStart?: string;
   dateEnd?: string;
-}): Promise<MaterialResaleTx[]> {
+}, signal?: AbortSignal): Promise<MaterialResaleTx[]> {
   const query = buildQueryString(params);
-  return request<MaterialResaleTx[]>(`/resales${query}`);
+  return request<MaterialResaleTx[]>(`/resales${query}`, { signal });
 }
 
 export async function fetchResaleStats(params?: {
@@ -171,9 +185,9 @@ export async function fetchExpenses(params?: {
   search?: string;
   dateStart?: string;
   dateEnd?: string;
-}): Promise<OtherExpense[]> {
+}, signal?: AbortSignal): Promise<OtherExpense[]> {
   const query = buildQueryString(params);
-  return request<OtherExpense[]>(`/expenses${query}`);
+  return request<OtherExpense[]>(`/expenses${query}`, { signal });
 }
 
 export async function fetchExpenseStats(params?: {

@@ -36,9 +36,10 @@ import {
   ComposedChart,
   Line
 } from 'recharts';
-import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary } from '../types';
+import type { ClientTransportTrip, MaterialResaleTx, OtherExpense, ClientSummary, DriverSummary, SupplierSummary } from '../types';
 import { T } from '../strings';
 import type { ChartTheme } from '../chart-theme';
+import { tripClientFee } from '../../server/trip-math';
 import { calcResale } from '../../server/resale-math';
 
 interface ExecutiveOverviewTabProps {
@@ -47,6 +48,7 @@ interface ExecutiveOverviewTabProps {
   expenses: OtherExpense[];
   clientSummaries: ClientSummary[];
   driverSummaries: DriverSummary[];
+  supplierSummaries: SupplierSummary[];
   onNavigateTab: (tab: 'transport' | 'resale' | 'expenses' | 'clients' | 'drivers' | 'suppliers') => void;
   /** Chart colours for the active theme — see src/chart-theme.ts. */
   charts: ChartTheme;
@@ -60,6 +62,7 @@ export function ExecutiveOverviewTab({
   expenses,
   clientSummaries,
   driverSummaries,
+  supplierSummaries,
   onNavigateTab,
   charts
 }: ExecutiveOverviewTabProps) {
@@ -68,23 +71,18 @@ export function ExecutiveOverviewTab({
   const metrics = useMemo(() => {
     // 1. Transport Trips
     let transportInvoiced = 0;
-    let transportDriverWages = 0;
     let transportCompanyProfit = 0;
     let transportTons = 0;
 
     trips.forEach(t => {
-      const fee = (t.truckCost || 0) + (t.driverCut || 0) + (t.companyProfit || 0);
+      const fee = tripClientFee(t);
       transportInvoiced += fee;
-      transportDriverWages += (t.driverCut || 0);
       transportCompanyProfit += (t.companyProfit || 0);
       transportTons += (t.totalTonnage || 0);
     });
 
     // 2. Material Resales
     let resaleInvoiced = 0;
-    let resaleSourcingCosts = 0;
-    let resaleDriverWages = 0;
-    let resaleLogisticsCosts = 0;
     let resaleTrueProfit = 0;
     let resaleTons = 0;
 
@@ -94,9 +92,6 @@ export function ExecutiveOverviewTab({
       const m = calcResale(r);
 
       resaleInvoiced += m.invoiceTotal;
-      resaleSourcingCosts += m.totalBuyCost;
-      resaleDriverWages += m.trips * (r.driverCost || 0);
-      resaleLogisticsCosts += m.trips * (r.truckCost || 0);
       resaleTrueProfit += m.netRealProfit;
       resaleTons += (r.totalTonnage || 0);
     });
@@ -115,15 +110,24 @@ export function ExecutiveOverviewTab({
     const clientAdvanceCredit = clientSummaries.reduce((sum, c) => sum + c.unallocatedCredit, 0);
 
     // 5. Driver Ledgers (Earned, Paid out, Payables)
-    const driverWagesEarned = driverSummaries.reduce((sum, d) => sum + d.totalEarned, 0);
     const driverPayoutsGiven = driverSummaries.reduce((sum, d) => sum + d.totalPaymentsGiven, 0);
     const driverOutstandingPayable = driverSummaries.reduce((sum, d) => sum + d.outstandingPayable, 0);
     const driverAdvances = driverSummaries.reduce((sum, d) => sum + d.advanceBalance, 0);
+    // Net basis for the profit deduction — see App.tsx masterNetProfit.
+    const driverUnearned = driverSummaries.reduce((sum, d) => sum + d.unearnedAdvance, 0);
+
+    // 6. Supplier advances still sitting with the factories (money out, no
+    // goods received against it yet). Like driver advances, these reduce the
+    // profit until deliveries consume them.
+    const supplierPrepaid = supplierSummaries.reduce((sum, sp) => sum + sp.prepaidBalance, 0);
+    const supplierUnmatched = supplierSummaries.reduce((sum, sp) => sum + sp.unmatchedPrepaid, 0);
 
     // Overall Combined Figures
     const grossInvoicedTurnover = transportInvoiced + resaleInvoiced;
     const grossDirectProfit = transportCompanyProfit + resaleTrueProfit;
-    const netOperatingProfit = grossDirectProfit - totalOperationalBurdens;
+    // Advances out are deducted for the same reason as on the formula deck:
+    // that money has left the company and nothing has earned it back yet.
+    const netOperatingProfit = grossDirectProfit - totalOperationalBurdens - driverUnearned - supplierUnmatched;
 
     // Margin %
     const netProfitMarginPercent = grossInvoicedTurnover > 0 ? (netOperatingProfit / grossInvoicedTurnover) * 100 : 0;
@@ -134,10 +138,12 @@ export function ExecutiveOverviewTab({
       clientOutstandingReceivable,
       clientAdvanceCredit,
 
-      driverWagesEarned,
       driverPayoutsGiven,
       driverOutstandingPayable,
       driverAdvances,
+      supplierPrepaid,
+      driverUnearned,
+      supplierUnmatched,
 
       totalOperationalBurdens,
       grossDirectProfit,
@@ -148,7 +154,7 @@ export function ExecutiveOverviewTab({
       resaleTons,
       totalTons: transportTons + resaleTons
     };
-  }, [trips, resales, expenses, clientSummaries, driverSummaries]);
+  }, [trips, resales, expenses, clientSummaries, driverSummaries, supplierSummaries]);
 
   // Chart data: Monthly Cashflow comparison
   const cashflowChartData = useMemo(() => {
@@ -224,6 +230,11 @@ export function ExecutiveOverviewTab({
           <div className="mt-3 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs">
             <span className="text-slate-400">{T.overview.driverAdvancesLabel}</span>
             <span className="font-bold text-purple-400 font-mono">+{metrics.driverAdvances.toLocaleString()} {T.common.currency}</span>
+          </div>
+          {/* The profit above deducts this — show the term, not just its effect. */}
+          <div className="mt-2 flex items-center justify-between text-xs">
+            <span className="text-slate-400">{T.overview.supplierPrepaidLabel}</span>
+            <span className="font-bold text-purple-400 font-mono">+{metrics.supplierPrepaid.toLocaleString()} {T.common.currency}</span>
           </div>
         </div>
 

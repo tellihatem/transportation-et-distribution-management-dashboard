@@ -16,8 +16,19 @@
 -- the original client_selling_price to the dinar. Amounts clients have already
 -- been invoiced and part-paid therefore do not move.
 --
--- Safe to re-run: rows that already carry a price are skipped, and the
--- expression is deterministic, so recomputing yields the same value.
+-- Rerun safety has two layers. In practice the whole file is skipped on any
+-- boot after the first, because the runner tolerates the ALTER's "duplicate
+-- column name" by skipping the file. But the backfill formula is written in
+-- the PRE-migration-012 transport model (truck + driver + margin summed), so
+-- if it ever ran against a database 012 has already restated it would write
+-- wrong — typically negative — unit prices. The schema_flags guard makes that
+-- impossible by construction rather than by accident of the runner: once 012
+-- has stamped the new model, this backfill refuses to touch anything.
+CREATE TABLE IF NOT EXISTS schema_flags (
+    key         TEXT PRIMARY KEY,
+    applied_at  TEXT DEFAULT (datetime('now'))
+);
+
 ALTER TABLE material_resales ADD COLUMN product_unit_price REAL DEFAULT 0;
 
 UPDATE material_resales
@@ -26,4 +37,5 @@ SET product_unit_price =
         - (MAX(1, COALESCE(trip_count, 1)) * (truck_cost + driver_cost + explicit_profit)))
       / total_tonnage
 WHERE (product_unit_price IS NULL OR product_unit_price = 0)
-  AND total_tonnage > 0;
+  AND total_tonnage > 0
+  AND NOT EXISTS (SELECT 1 FROM schema_flags WHERE key = 'resale_transport_model_v2');
