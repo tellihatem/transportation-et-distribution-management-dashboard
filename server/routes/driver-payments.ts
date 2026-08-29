@@ -6,9 +6,12 @@
 import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
-import { queueSync } from '../sync/replicator';
-import { syncTripDriverPaid, allocateDriverPayment, RESALE_DRIVER_WAGE_SQL } from '../ledgers';
+import { syncTripDriverPaid, allocateDriverPayment, RESALE_DRIVER_WAGE_SQL, applyDriverAdvance, manualAllocationError } from '../ledgers';
 
+// NOTE deliberately no queueSync here: the payment/allocation tables are
+// local-only (no Supabase mirror). Queuing deletes for them errors into
+// sync_queue and retries forever — see server/routes/suppliers.ts for the
+// same decision documented on the supplier ledger.
 const router = Router();
 
 /**
@@ -136,8 +139,16 @@ router.get('/summary', asyncHandler(async (_req: Request, res: Response) => {
     const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
 
     const totalAllocatedPaid = transportPaid + resalePaid;
+    // Not yet applied to any trip — the figure the drawdown views track.
     const advanceBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-    const outstandingPayable = Math.max(0, totalEarned - totalPaymentsGiven);
+    // Paid beyond everything EARNED — the only part that is money out with no
+    // work behind it, and therefore the only part the profit views deduct.
+    // (advanceBalance would double-count: an unallocated payment against an
+    // earned wage is a bookkeeping gap, not missing money.)
+    const unearnedAdvance = Math.max(0, totalPaymentsGiven - totalEarned);
+    // Work done and not settled. Allocation basis, matching the client and
+    // supplier ledgers — an advance sitting unapplied does not hide it.
+    const outstandingPayable = Math.max(0, totalEarned - totalAllocatedPaid);
 
     const totalTripsCount = trips.length + resales.length;
     const unpaidTripsCount = trips.filter(t => (t.driver_paid ?? 0) < t.driver_cut).length +
@@ -150,6 +161,7 @@ router.get('/summary', asyncHandler(async (_req: Request, res: Response) => {
       totalAllocatedPaid,
       outstandingPayable,
       advanceBalance,
+      unearnedAdvance,
       totalTripsCount,
       unpaidTripsCount
     };
@@ -201,7 +213,8 @@ router.get('/statement/:driverName', asyncHandler(async (req: Request, res: Resp
   const totalAllocatedPaid = itemizedTrips.reduce((sum, item) => sum + item.driverPaid, 0);
   const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
   const advanceBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-  const outstandingPayable = Math.max(0, totalEarned - totalPaymentsGiven);
+  const unearnedAdvance = Math.max(0, totalPaymentsGiven - totalEarned);
+  const outstandingPayable = Math.max(0, totalEarned - totalAllocatedPaid);
 
   res.json({
     success: true,
@@ -212,7 +225,8 @@ router.get('/statement/:driverName', asyncHandler(async (req: Request, res: Resp
         totalPaymentsGiven,
         totalAllocatedPaid,
         outstandingPayable,
-        advanceBalance
+        advanceBalance,
+        unearnedAdvance
       },
       itemizedTrips,
       payments: payments.map(p => ({
@@ -264,6 +278,13 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
         const allocAmt = Math.min(alloc.amount, remainingToAllocate);
         if (allocAmt <= 0) break;
 
+        // A bad manual row must fail loudly now, not poison the ledger until
+        // the next work edit tears down the whole row's allocations.
+        const problem = manualAllocationError('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
+        if (problem) {
+          throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+        }
+
         db.prepare(`
           INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
           VALUES (?, ?, ?, ?)
@@ -281,7 +302,6 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   executePaymentTx();
 
   const created = db.prepare('SELECT * FROM driver_payments WHERE id = ?').get(id);
-  queueSync('driver_payments', id, 'upsert', created);
 
   res.status(201).json({ success: true, data: created });
 }));
@@ -302,7 +322,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId) as any;
   if (!existing) throw createApiError('Payment not found', 404, 'NOT_FOUND');
 
-  const { date, driverName, amount, paymentType, notes, allocationMode } = req.body;
+  const { date, driverName, amount, paymentType, notes, allocationMode, allocations } = req.body;
 
   if (!date || !driverName || !amount || amount <= 0) {
     throw createApiError('Missing required fields: date, driverName, amount', 400, 'VALIDATION_ERROR');
@@ -330,10 +350,26 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     // 'none' leaves the money unallocated — an advance, same as on create.
     if (allocationMode === 'auto') {
       allocateDriverPayment(paymentId, driverName, amount);
+    } else if (allocationMode === 'manual' && Array.isArray(allocations)) {
+      let remainingToAllocate = amount;
+      for (const alloc of allocations) {
+        if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0) continue;
+        const allocAmt = Math.min(alloc.amount, remainingToAllocate);
+        if (allocAmt <= 0) break;
+        const problem = manualAllocationError('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
+        if (problem) throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+        db.prepare(`INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount) VALUES (?, ?, ?, ?)`)
+          .run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
+        syncTripDriverPaid(alloc.tripType, alloc.tripId);
+        remainingToAllocate -= allocAmt;
+      }
     }
   });
 
   updateTx();
+
+  applyDriverAdvance(existing.driver_name);
+  if (driverName !== existing.driver_name) applyDriverAdvance(driverName);
 
   const updated = db.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId);
   res.json({ success: true, data: updated });
@@ -362,7 +398,11 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   });
 
   deleteTx();
-  queueSync('driver_payments', paymentId, 'delete', null);
+
+  // Same sweep as on the client side: freed wages resettle from any other
+  // credit the driver still holds.
+  applyDriverAdvance((existing as any).driver_name);
+
 
   res.json({ success: true, message: 'Driver payout deleted and allocations reverted' });
 }));

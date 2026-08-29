@@ -8,7 +8,7 @@ import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
 import { queueSync } from '../sync/replicator';
 import { reconcileWork } from '../ledgers';
-import { tripClientFee, tripCompanyProfit } from '../trip-math';
+import { tripClientFee, tripCompanyProfit, firstNegativeMoneyField } from '../trip-math';
 
 const router = Router();
 
@@ -82,7 +82,10 @@ router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
     const tripFee = tripClientFee({ truckCost: row.truck_cost });
     grossRevenue += tripFee;
     driverPayout += row.driver_cut;
-    netMargin += row.company_profit;
+    // Recomputed, not read from the stored column: rows that arrived by
+    // backup import or cloud restore may carry a stale company_profit, and
+    // these three figures must always reconcile (revenue = payout + margin).
+    netMargin += tripCompanyProfit({ truckCost: row.truck_cost, driverCut: row.driver_cut });
     totalTons += row.total_tonnage;
   });
 
@@ -118,6 +121,15 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 
   if (!id || !date || !clientName) {
     throw createApiError('Missing required fields: id, date, clientName', 400, 'VALIDATION_ERROR');
+  }
+  // Every trip must name its driver: the wage reduces profit, so without a
+  // name it would be a cost owed to nobody, invisible to every ledger.
+  if (!driverName || !String(driverName).trim()) {
+    throw createApiError('Missing required field: driverName', 400, 'VALIDATION_ERROR');
+  }
+  const negative = firstNegativeMoneyField({ truckCost, driverCut, totalTonnage });
+  if (negative) {
+    throw createApiError(`Field ${negative} must not be negative`, 400, 'VALIDATION_ERROR');
   }
 
   // Check for duplicate ID
@@ -155,6 +167,17 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 
   const { date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, driverName } = req.body;
 
+  if (!driverName || !String(driverName).trim()) {
+    throw createApiError('Missing required field: driverName', 400, 'VALIDATION_ERROR');
+  }
+  const negativePut = firstNegativeMoneyField({ truckCost, driverCut, totalTonnage });
+  if (negativePut) {
+    throw createApiError(`Field ${negativePut} must not be negative`, 400, 'VALIDATION_ERROR');
+  }
+
+  // One transaction: the row update and the ledger reconciliation stand or
+  // fall together, like the DELETE path already does.
+  const updateTx = db.transaction(() => {
   db.prepare(`
     UPDATE client_trips SET
       date = ?, client_name = ?, origin_factory = ?, destination = ?,
@@ -172,6 +195,8 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     clientNames: [clientName, existing.client_name],
     driverNames: [driverName, existing.driver_name],
   });
+  });
+  updateTx();
 
   const updated = db.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
   queueSync('client_trips', req.params.id, 'upsert', updated);

@@ -4,7 +4,8 @@
 -- supplier comes from TWO sources: the goods cost of every resale bought from
 -- that supplier (factory_purchase_price × total_tonnage, matched by
 -- origin_factory) and manual supplier invoices for purchases made outside any
--- resale record. Payments to the supplier net against the combined total;
+-- resale record. Payments are drawn down against deliveries (drawdown, not
+-- net offset);
 -- FIFO allocation happens only when a payment is recorded.
 --
 -- Re-run safe: everything is IF NOT EXISTS, and the migration runner

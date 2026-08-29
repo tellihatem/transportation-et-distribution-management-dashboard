@@ -115,6 +115,7 @@ export const T = {
     driverPayables: "مستحقات السائقين الواجبة",
     /** Sub-line of card 4: money advanced to drivers before settlement. */
     driverAdvancesLabel: "سلف السائقين:",
+    supplierPrepaidLabel: "دفعات مسبقة لدى الموردين:",
 
     /** Title above the main comparison bar chart. */
     chartTitle: "مقارنة المؤشرات المالية والسيولة النقدية (دج)",
@@ -588,6 +589,8 @@ export const T = {
     printDateLabel: "تاريخ الطباعة:",
     /** Signature block for the owner, on every printed document. */
     approvedBy: "صادق عليها المسؤول",
+    /** Filename prefix when a statement is saved as PDF: "<prefix>-<name>". */
+    statementFilePrefix: "كشف-حساب",
   },
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -713,10 +716,12 @@ export const T = {
     supplierPrepaidOut: "دفعات مسبقة لدى الموردين",
     netProfit: "صافي ربح الشركة",
     /** The four cash-position boxes underneath the formula. */
-    cashCollected: "المحصّل من العملاء",
-    cashReceivable: "متبقي على العملاء",
-    driverPaid: "المدفوع للسائقين",
-    driverPayable: "متبقي للسائقين",
+    /** The four boxes and the two advance terms are BALANCES over all time,
+     *  not period flows — the date filter deliberately does not move them. */
+    cashCollected: "المحصّل من العملاء (إجمالي)",
+    cashReceivable: "متبقي على العملاء (إجمالي)",
+    driverPaid: "المدفوع للسائقين (إجمالي)",
+    driverPayable: "متبقي للسائقين (إجمالي)",
     /** The large profit figure on the right of the panel. */
     periodProfitTitle: "صافي ربح الشركة خلال الفترة",
     /** Reminder that the profit above is invoiced, not cash in hand. */
@@ -769,7 +774,6 @@ export const T = {
     chartTitle: "توزيع التكلفة الصافي لكل رحلة",
     chartSubtitle: "أشرطة تظهر انقسام العوائد بين الشاحنة، السائق وهامش المؤسسة",
     chartEmpty: "لا توجد بيانات مخطط كافية للفلترة",
-    legendTrucks: "شاحنات",
     legendDrivers: "سائقين",
     legendProfit: "أرباح الشركة",
 
@@ -801,8 +805,9 @@ export const T = {
     kpiTurnoverHint: "حجم تعاملات التوريد الكلي للمواد",
     kpiCapital: "رأس المال والمشتريات",
     kpiCapitalHint: "القيمة المستحقة للمصنع لشراء المواد",
-    kpiVisibleTransport: "أجور النقل الظاهرة",
-    kpiVisibleTransportHint: "رسوم النقل المقيدة على المعاملة",
+    /** Transport is billed to the client — this is revenue, not a cost. */
+    kpiVisibleTransport: "إيراد النقل المفوتر",
+    kpiVisibleTransportHint: "رسوم النقل المحمّلة على فواتير الزبائن",
     kpiTrueProfit: "إجمالي الربح الحقيقي",
     kpiTrueProfitHint: "مجمل ربح البضاعة زائد هامش النقل",
     kpiClientOutstanding: "متبقي على العملاء",
@@ -979,21 +984,6 @@ export const T = {
     originLabel: "منشأ الشحنة:",
     destinationLabel: "الوجهة المستهدفة:",
     driverLabel: "السائق:",
-    /** Price lines on a resale invoice: goods, then delivery, then total. */
-    goodsPriceLabel: (qty: number, unit: string, unitPrice: string) =>
-      `ثمن البضاعة (${qty} ${unit} × ${unitPrice} دج)`,
-    deliveryPriceLabel: "سعر النقل والتوصيل",
-    /** Same delivery line when the job took more than one trip, showing what
-     *  the client pays for each trip. That figure is this line's total divided
-     *  by the number of trips — it is the client's price per trip, not the
-     *  company's cost, so the margin stays private and the two numbers always
-     *  multiply back to the total shown. */
-    deliveryPriceMultiTrip: (trips: number, perTrip: string) =>
-      `سعر النقل والتوصيل (${trips} رحلات × ${perTrip} دج)`,
-    /** Used when the total does not divide into a whole price per trip. No
-     *  per-trip figure is printed, because there is no exact one and money is
-     *  never rounded on an invoice — only the number of trips is stated. */
-    deliveryPriceTripsOnly: (trips: number) => `سعر النقل والتوصيل (${trips} رحلات)`,
     /** Title of the delivery line on a resale invoice; the line beneath it
      *  reads "<trips> رحلة × <price per trip>". */
     transportLineTitle: "خدمات النقل والتوصيل",
@@ -1030,7 +1020,6 @@ export const T = {
     currencyNote: "العملة: الدينار الجزائري",
     truckHire: "صرف تأجير المركبة:",
     driverWage: "أجرة السائق:",
-    companyProfit: "أرباح المؤسسة الصافية:",
     invoiceTotal: "مجموع الفاتورة الكلي:",
     clientPaid: "المدفوع من العميل:",
     clientRemaining: "المتبقي على العميل:",

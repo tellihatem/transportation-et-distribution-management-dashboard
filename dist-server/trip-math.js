@@ -27,6 +27,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TRIP_CLIENT_FEE_SQL = void 0;
 exports.tripClientFee = tripClientFee;
 exports.tripCompanyProfit = tripCompanyProfit;
+exports.firstNegativeMoneyField = firstNegativeMoneyField;
 /** What the client owes for the trip: the agreed truck hire, whole. */
 function tripClientFee(t) {
     return Number(t.truckCost) || 0;
@@ -41,3 +42,16 @@ function tripCompanyProfit(t) {
  * so the two are read — and changed — together.
  */
 exports.TRIP_CLIENT_FEE_SQL = 'truck_cost';
+/**
+ * Throw-friendly guard: money fields may be zero but never negative.
+ * (A wage above its hire is legal — a trip run at a loss — but a negative
+ * amount is always a typo, and unchecked it corrupts the ledgers: a negative
+ * fee makes work invisible to the FIFO sweeps while still moving the KPIs.)
+ */
+function firstNegativeMoneyField(fields) {
+    for (const [name, value] of Object.entries(fields)) {
+        if (value !== undefined && value !== null && Number(value) < 0)
+            return name;
+    }
+    return null;
+}

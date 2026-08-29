@@ -76,7 +76,10 @@ router.get('/stats', (0, error_handler_1.asyncHandler)(async (req, res) => {
         const tripFee = (0, trip_math_1.tripClientFee)({ truckCost: row.truck_cost });
         grossRevenue += tripFee;
         driverPayout += row.driver_cut;
-        netMargin += row.company_profit;
+        // Recomputed, not read from the stored column: rows that arrived by
+        // backup import or cloud restore may carry a stale company_profit, and
+        // these three figures must always reconcile (revenue = payout + margin).
+        netMargin += (0, trip_math_1.tripCompanyProfit)({ truckCost: row.truck_cost, driverCut: row.driver_cut });
         totalTons += row.total_tonnage;
     });
     res.json({ success: true, data: { grossRevenue, driverPayout, netMargin, totalTons } });
@@ -109,6 +112,15 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     if (!id || !date || !clientName) {
         throw (0, error_handler_1.createApiError)('Missing required fields: id, date, clientName', 400, 'VALIDATION_ERROR');
     }
+    // Every trip must name its driver: the wage reduces profit, so without a
+    // name it would be a cost owed to nobody, invisible to every ledger.
+    if (!driverName || !String(driverName).trim()) {
+        throw (0, error_handler_1.createApiError)('Missing required field: driverName', 400, 'VALIDATION_ERROR');
+    }
+    const negative = (0, trip_math_1.firstNegativeMoneyField)({ truckCost, driverCut, totalTonnage });
+    if (negative) {
+        throw (0, error_handler_1.createApiError)(`Field ${negative} must not be negative`, 400, 'VALIDATION_ERROR');
+    }
     // Check for duplicate ID
     const existing = database_1.default.prepare('SELECT id FROM client_trips WHERE id = ?').get(id);
     if (existing) {
@@ -136,7 +148,17 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     if (!existing)
         throw (0, error_handler_1.createApiError)('Trip not found', 404, 'NOT_FOUND');
     const { date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit, truckCost, driverCut, driverName } = req.body;
-    database_1.default.prepare(`
+    if (!driverName || !String(driverName).trim()) {
+        throw (0, error_handler_1.createApiError)('Missing required field: driverName', 400, 'VALIDATION_ERROR');
+    }
+    const negativePut = (0, trip_math_1.firstNegativeMoneyField)({ truckCost, driverCut, totalTonnage });
+    if (negativePut) {
+        throw (0, error_handler_1.createApiError)(`Field ${negativePut} must not be negative`, 400, 'VALIDATION_ERROR');
+    }
+    // One transaction: the row update and the ledger reconciliation stand or
+    // fall together, like the DELETE path already does.
+    const updateTx = database_1.default.transaction(() => {
+        database_1.default.prepare(`
     UPDATE client_trips SET
       date = ?, client_name = ?, origin_factory = ?, destination = ?,
       material_type = ?, total_tonnage = ?, quantity_unit = ?, truck_cost = ?, driver_cut = ?,
@@ -144,14 +166,16 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
       updated_at = datetime('now'), synced_at = NULL
     WHERE id = ?
   `).run(date, clientName, originFactory, destination, materialType, totalTonnage, quantityUnit || 'طن', truckCost, driverCut, (0, trip_math_1.tripCompanyProfit)({ truckCost, driverCut }), driverName || '', req.params.id);
-    // Both the old and new parties are reconciled: a trip moved to another
-    // client hands its money back to the first one as credit.
-    (0, ledgers_1.reconcileWork)({
-        tripType: 'transport',
-        tripId: req.params.id,
-        clientNames: [clientName, existing.client_name],
-        driverNames: [driverName, existing.driver_name],
+        // Both the old and new parties are reconciled: a trip moved to another
+        // client hands its money back to the first one as credit.
+        (0, ledgers_1.reconcileWork)({
+            tripType: 'transport',
+            tripId: req.params.id,
+            clientNames: [clientName, existing.client_name],
+            driverNames: [driverName, existing.driver_name],
+        });
     });
+    updateTx();
     const updated = database_1.default.prepare('SELECT * FROM client_trips WHERE id = ?').get(req.params.id);
     (0, replicator_1.queueSync)('client_trips', req.params.id, 'upsert', updated);
     res.json({ success: true, data: mapRowToTrip(updated) });

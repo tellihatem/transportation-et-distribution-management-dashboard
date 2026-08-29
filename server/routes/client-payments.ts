@@ -6,10 +6,13 @@
 import { Router, Request, Response } from 'express';
 import db from '../database';
 import { asyncHandler, createApiError } from '../middleware/error-handler';
-import { queueSync } from '../sync/replicator';
-import { syncTripClientPaid, allocateClientPayment } from '../ledgers';
+import { syncTripClientPaid, allocateClientPayment, applyClientCredit, manualAllocationError } from '../ledgers';
 import { tripClientFee } from '../trip-math';
 
+// NOTE deliberately no queueSync here: the payment/allocation tables are
+// local-only (no Supabase mirror). Queuing deletes for them errors into
+// sync_queue and retries forever — see server/routes/suppliers.ts for the
+// same decision documented on the supplier ledger.
 const router = Router();
 
 /**
@@ -256,6 +259,13 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
         const allocAmt = Math.min(alloc.amount, remainingToAllocate);
         if (allocAmt <= 0) break;
 
+        // A bad manual row must fail loudly now, not poison the ledger until
+        // the next work edit tears down the whole row's allocations.
+        const problem = manualAllocationError('client', clientName, alloc.tripType, alloc.tripId, allocAmt);
+        if (problem) {
+          throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+        }
+
         db.prepare(`
           INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
           VALUES (?, ?, ?, ?)
@@ -273,7 +283,6 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   executePaymentTx();
 
   const created = db.prepare('SELECT * FROM client_payments WHERE id = ?').get(id);
-  queueSync('client_payments', id, 'upsert', created);
 
   res.status(201).json({ success: true, data: created });
 }));
@@ -292,7 +301,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const existing = db.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId) as any;
   if (!existing) throw createApiError('Payment not found', 404, 'NOT_FOUND');
 
-  const { date, clientName, amount, paymentMethod, notes, allocationMode } = req.body;
+  const { date, clientName, amount, paymentMethod, notes, allocationMode, allocations } = req.body;
 
   if (!date || !clientName || !amount || amount <= 0) {
     throw createApiError('Missing required fields: date, clientName, amount', 400, 'VALIDATION_ERROR');
@@ -318,10 +327,30 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     // 'none' leaves the money unallocated — a deposit, same as on create.
     if (allocationMode === 'auto') {
       allocateClientPayment(paymentId, clientName, amount);
+    } else if (allocationMode === 'manual' && Array.isArray(allocations)) {
+      // Same rules as POST — an edited receipt may keep hand-placed rows
+      // rather than silently converting them into an advance.
+      let remainingToAllocate = amount;
+      for (const alloc of allocations) {
+        if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0) continue;
+        const allocAmt = Math.min(alloc.amount, remainingToAllocate);
+        if (allocAmt <= 0) break;
+        const problem = manualAllocationError('client', clientName, alloc.tripType, alloc.tripId, allocAmt);
+        if (problem) throw createApiError(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+        db.prepare(`INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount) VALUES (?, ?, ?, ?)`)
+          .run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
+        syncTripClientPaid(alloc.tripType, alloc.tripId);
+        remainingToAllocate -= allocAmt;
+      }
     }
   });
 
   updateTx();
+
+  // Work the old allocations were covering may be unpaid again, and if the
+  // payment moved to another client, both parties' credit must resettle.
+  applyClientCredit(existing.client_name);
+  if (clientName !== existing.client_name) applyClientCredit(clientName);
 
   const updated = db.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
   res.json({ success: true, data: updated });
@@ -355,7 +384,12 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   });
 
   deleteTx();
-  queueSync('client_payments', paymentId, 'delete', null);
+
+  // The trips this payment covered are unpaid again. If the client holds any
+  // other unapplied credit, it belongs on them now — the same sweep every
+  // work-side write performs.
+  applyClientCredit((existing as any).client_name);
+
 
   res.json({ success: true, message: 'Payment deleted and allocations reverted' });
 }));

@@ -21,6 +21,14 @@ export const RESALE_DRIVER_WAGE_SQL = 'MAX(1, COALESCE(trip_count, 1)) * driver_
 
 export type TripType = 'transport' | 'resale';
 
+/**
+ * Money tolerance. Prices are unit × quantity with REAL quantities, so totals
+ * can carry float dust (…000000003). A strict `paid < fee` comparison would
+ * keep an exactly-paid invoice "unpaid" forever and make every sweep insert
+ * sub-centime allocation rows. Anything within half a centime is settled.
+ */
+export const MONEY_EPSILON = 0.005;
+
 /** Recalculate a trip/resale's client_paid cache from the allocation rows. */
 export function syncTripClientPaid(tripType: TripType, tripId: string) {
   const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
@@ -58,14 +66,14 @@ function unpaidClientWork(clientName: string): any[] {
   const trips = db.prepare(`
     SELECT id, 'transport' as trip_type, date, ${TRIP_CLIENT_FEE_SQL} as total_fee, client_paid as paid
     FROM client_trips
-    WHERE client_name = ? AND client_paid < ${TRIP_CLIENT_FEE_SQL}
+    WHERE client_name = ? AND client_paid < ${TRIP_CLIENT_FEE_SQL} - ${MONEY_EPSILON}
     ORDER BY date ASC
   `).all(clientName) as any[];
 
   const resales = db.prepare(`
     SELECT id, 'resale' as trip_type, date, client_selling_price as total_fee, client_paid as paid
     FROM material_resales
-    WHERE end_client = ? AND client_paid < client_selling_price
+    WHERE end_client = ? AND client_paid < client_selling_price - ${MONEY_EPSILON}
     ORDER BY date ASC
   `).all(clientName) as any[];
 
@@ -77,14 +85,14 @@ function unpaidDriverWork(driverName: string): any[] {
   const trips = db.prepare(`
     SELECT id, 'transport' as trip_type, date, driver_cut as total_fee, driver_paid as paid
     FROM client_trips
-    WHERE driver_name = ? AND driver_paid < driver_cut
+    WHERE driver_name = ? AND driver_paid < driver_cut - ${MONEY_EPSILON}
     ORDER BY date ASC
   `).all(driverName) as any[];
 
   const resales = db.prepare(`
     SELECT id, 'resale' as trip_type, date, ${RESALE_DRIVER_WAGE_SQL} as total_fee, driver_paid as paid
     FROM material_resales
-    WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL}
+    WHERE driver_name = ? AND driver_paid < ${RESALE_DRIVER_WAGE_SQL} - ${MONEY_EPSILON}
     ORDER BY date ASC
   `).all(driverName) as any[];
 
@@ -100,7 +108,7 @@ export function allocateClientPayment(paymentId: string, clientName: string, amo
   for (const item of unpaidClientWork(clientName)) {
     if (remaining <= 0) break;
     const due = item.total_fee - (item.paid ?? 0);
-    if (due <= 0) continue;
+    if (due <= MONEY_EPSILON) continue;
     const allocAmt = Math.min(due, remaining);
     db.prepare(`
       INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
@@ -117,7 +125,7 @@ export function allocateDriverPayment(paymentId: string, driverName: string, amo
   for (const item of unpaidDriverWork(driverName)) {
     if (remaining <= 0) break;
     const due = item.total_fee - (item.paid ?? 0);
-    if (due <= 0) continue;
+    if (due <= MONEY_EPSILON) continue;
     const allocAmt = Math.min(due, remaining);
     db.prepare(`
       INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
@@ -138,7 +146,7 @@ function unappliedPayments(table: string, allocTable: string, nameColumn: string
     FROM ${table} p
     WHERE p.${nameColumn} = ?
     ORDER BY p.date ASC, p.id ASC
-  `).all(name).filter((p: any) => p.unapplied > 0) as any[];
+  `).all(name).filter((p: any) => p.unapplied > MONEY_EPSILON) as any[];
 }
 
 /**
@@ -226,4 +234,43 @@ export function reconcileWork(opts: {
   if (opts.tripId) releaseStaleAllocations(opts.tripType, opts.tripId);
   for (const name of new Set((opts.clientNames ?? []).filter(Boolean) as string[])) applyClientCredit(name);
   for (const name of new Set((opts.driverNames ?? []).filter(Boolean) as string[])) applyDriverAdvance(name);
+}
+
+/**
+ * Validate one manual allocation before it is written: the target must exist,
+ * belong to the named party, and still have room for the amount. Returns an
+ * error string, or null when the allocation is sound. Without this, a typo'd
+ * trip id or an over-allocation survives until the next work edit — which
+ * then wipes EVERY allocation on that row, correct ones included.
+ */
+export function manualAllocationError(
+  side: 'client' | 'driver',
+  partyName: string,
+  tripType: TripType,
+  tripId: string,
+  amount: number
+): string | null {
+  const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
+  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(tripId) as any;
+  if (!row) return `target ${tripId} does not exist`;
+
+  if (side === 'client') {
+    const owner = tripType === 'transport' ? row.client_name : row.end_client;
+    if (owner !== partyName) return `target ${tripId} belongs to ${owner || 'no one'}, not ${partyName}`;
+    const fee = tripType === 'transport'
+      ? tripClientFee({ truckCost: row.truck_cost })
+      : (row.client_selling_price ?? 0);
+    if ((row.client_paid ?? 0) + amount > fee + MONEY_EPSILON) {
+      return `target ${tripId} only has ${fee - (row.client_paid ?? 0)} remaining`;
+    }
+  } else {
+    if (row.driver_name !== partyName) return `target ${tripId} belongs to ${row.driver_name || 'no one'}, not ${partyName}`;
+    const wage = tripType === 'transport'
+      ? (row.driver_cut ?? 0)
+      : Math.max(1, row.trip_count ?? 1) * (row.driver_cost ?? 0);
+    if ((row.driver_paid ?? 0) + amount > wage + MONEY_EPSILON) {
+      return `target ${tripId} only has ${wage - (row.driver_paid ?? 0)} remaining`;
+    }
+  }
+  return null;
 }

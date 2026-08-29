@@ -207,7 +207,6 @@ export default function App() {
     productUnitPrice: 4500,
     totalTonnage: 40,
     quantityUnit: T.common.defaultUnit,
-    clientSellingPrice: 150000,
     truckCost: 18000,
     driverCost: 5000,
     explicitProfit: 0,
@@ -303,25 +302,19 @@ export default function App() {
     let grossRevenue = 0; // Total transport fee = truck cost + driver cut + company profit
     let driverPayout = 0;
     let netMargin = 0; // Company Profit
-    let totalTons = 0;
     let clientOutstanding = 0; // Still owed by clients
     let driverOutstanding = 0; // Still owed to drivers
-    let clientCollected = 0;   // Cash actually received (from the client ledger)
-    let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
 
     filteredClientTrips.forEach(trip => {
       const tripFee = tripClientFee(trip);
       grossRevenue += tripFee;
       driverPayout += trip.driverCut;
       netMargin += trip.companyProfit;
-      totalTons += trip.totalTonnage;
       clientOutstanding += Math.max(0, tripFee - (trip.clientPaid || 0));
       driverOutstanding += Math.max(0, trip.driverCut - (trip.driverPaid || 0));
-      clientCollected += (trip.clientPaid || 0);
-      driverSettled += (trip.driverPaid || 0);
     });
 
-    return { grossRevenue, driverPayout, netMargin, totalTons, clientOutstanding, driverOutstanding, clientCollected, driverSettled };
+    return { grossRevenue, driverPayout, netMargin, clientOutstanding, driverOutstanding };
   }, [filteredClientTrips]);
 
   // Tab 2 Profits
@@ -329,11 +322,8 @@ export default function App() {
     let tradingTurnover = 0; // client selling price
     let capitalOutlay = 0;    // purchase price * tonnage
     let totalTrueProfit = 0;
-    let totalTons = 0;
     let clientOutstanding = 0; // Still owed by clients
     let driverOutstanding = 0; // Still owed to drivers
-    let clientCollected = 0;   // Cash actually received (from the client ledger)
-    let driverSettled = 0;     // Cash actually paid out (from the driver ledger)
 
     filteredResaleTxs.forEach(tx => {
       const m = calcResale(tx);
@@ -342,14 +332,11 @@ export default function App() {
       tradingTurnover += m.invoiceTotal;
       capitalOutlay += m.totalBuyCost;
       totalTrueProfit += m.netRealProfit;
-      totalTons += tx.totalTonnage;
       clientOutstanding += Math.max(0, tx.clientSellingPrice - (tx.clientPaid || 0));
       driverOutstanding += Math.max(0, driverWage - (tx.driverPaid || 0));
-      clientCollected += (tx.clientPaid || 0);
-      driverSettled += (tx.driverPaid || 0);
     });
 
-    return { tradingTurnover, capitalOutlay, totalTrueProfit, totalTons, clientOutstanding, driverOutstanding, clientCollected, driverSettled };
+    return { tradingTurnover, capitalOutlay, totalTrueProfit, clientOutstanding, driverOutstanding };
   }, [filteredResaleTxs]);
 
   // Tab 3 Expenses
@@ -384,8 +371,11 @@ export default function App() {
   // and comes back on its own as the work arrives, because the deduction here
   // falls to zero at the same moment the wage or goods cost starts being
   // counted inside that work's own profit.
-  const driverAdvancesOut = driverSummaries.reduce((sum, d) => sum + d.advanceBalance, 0);
-  const supplierPrepaidOut = supplierSummaries.reduce((sum, sup) => sum + sup.prepaidBalance, 0);
+  // NET basis (paid beyond earned/owed), not the drawdown balances: once the
+  // work or goods exist, their cost already sits inside the profit above, and
+  // deducting the still-unapplied payment as well would count it twice.
+  const driverAdvancesOut = driverSummaries.reduce((sum, d) => sum + d.unearnedAdvance, 0);
+  const supplierPrepaidOut = supplierSummaries.reduce((sum, sup) => sum + sup.unmatchedPrepaid, 0);
 
   const masterNetProfit =
     (tab1Stats.netMargin + tab2Stats.totalTrueProfit)
@@ -455,7 +445,6 @@ export default function App() {
         productUnitPrice: 4500,
         totalTonnage: 40,
         quantityUnit: T.common.defaultUnit,
-        clientSellingPrice: 180000,
         truckCost: 18000,
         driverCost: 5000,
         explicitProfit: 0,
@@ -666,11 +655,13 @@ export default function App() {
     }
   };
 
-  // Stacked chart data formatting for Tab 1 Cost breakdown
+  // Stacked chart data for Tab 1: how each trip's hire splits between the
+  // driver's wage and the company's margin. The hire itself is NOT a third
+  // segment — it is the sum of these two, so stacking it as well would draw
+  // every bar at twice the trip's real value.
   const tab1ChartData = useMemo(() => {
     return filteredClientTrips.slice(0, 10).map(trip => ({
       name: trip.id,
-      [T.charts.truckCost]: trip.truckCost,
       [T.charts.driverDue]: trip.driverCut,
       [T.charts.companyMargin]: trip.companyProfit,
     })).reverse();
@@ -1281,9 +1272,9 @@ export default function App() {
             {activeTab === "overview" && (
               <div key="tab-overview" className="">
                 <ExecutiveOverviewTab
-                  trips={clientTrips}
-                  resales={resaleTxs}
-                  expenses={expenses}
+                  trips={filteredClientTrips}
+                  resales={filteredResaleTxs}
+                  expenses={filteredExpenses}
                   clientSummaries={clientSummaries}
                   driverSummaries={driverSummaries}
                   supplierSummaries={supplierSummaries}
@@ -1420,7 +1411,6 @@ export default function App() {
                             <XAxis type="number" stroke={charts.axis} fontSize={9} />
                             <YAxis type="category" dataKey="name" stroke={charts.axis} fontSize={9} width={45} />
                             <Tooltip contentStyle={{ background: charts.tooltipBg, border: `1px solid ${charts.tooltipBorder}`, color: charts.tooltipText }} />
-                            <Bar dataKey={T.charts.truckCost} stackId="a" fill="#3b82f6" />
                             <Bar dataKey={T.charts.driverDue} stackId="a" fill="#10b981" />
                             <Bar dataKey={T.charts.companyMargin} stackId="a" fill="#06b6d4" />
                           </BarChart>
@@ -1429,10 +1419,6 @@ export default function App() {
                     </div>
 
                     <div className="flex gap-2 text-[10px] text-slate-400 mt-4 justify-around bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                      <div className="flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
-                        <span>{T.transport.legendTrucks}</span>
-                      </div>
                       <div className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-[#10b981]"></span>
                         <span>{T.transport.legendDrivers}</span>
@@ -1721,9 +1707,9 @@ export default function App() {
                                     <td className="p-3">
                                       <div className="font-bold text-slate-100">{tx.driverName || "—"}</div>
                                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                        {(tx.driverPaid || 0).toLocaleString()} / {tx.driverCost.toLocaleString()} {T.common.currency}
+                                        {(tx.driverPaid || 0).toLocaleString()} / {(m.trips * tx.driverCost).toLocaleString()} {T.common.currency}
                                       </div>
-                                      <div className="mt-1"><PaymentBadge paid={tx.driverPaid || 0} total={tx.driverCost} /></div>
+                                      <div className="mt-1"><PaymentBadge paid={tx.driverPaid || 0} total={m.trips * tx.driverCost} /></div>
                                     </td>
                                     <td className="p-3">
                                       <div className="flex items-center gap-1.5 justify-end">
@@ -1881,7 +1867,7 @@ export default function App() {
                                     {TRANSLATE_EXPENSE_CATEGORY[exp.category] || exp.category}
                                   </td>
                                   <td className="p-3 text-slate-400 font-mono">{exp.truckPlate}</td>
-                                  <td className="p-3 font-mono font-bold text-rose-400">{exp.amount.toLocaleString()} {T.common.currency}</td>
+                                  <td className={`p-3 font-mono font-bold ${exp.status === "Pending" ? "text-slate-400" : "text-rose-400"}`}>{exp.amount.toLocaleString()} {T.common.currency}</td>
                                   <td className="p-3">
                                     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${exp.status === "Paid"
                                       ? "bg-emerald-900/30 text-emerald-400 border border-emerald-800/65"
@@ -2059,6 +2045,7 @@ export default function App() {
                         <label className="block text-slate-400 mb-1">{T.form.driverName}</label>
                         <input
                           type="text"
+                          required
                           placeholder={T.form.tripDriverPlaceholder}
                           value={tripForm.driverName}
                           onChange={e => setTripForm(p => ({ ...p, driverName: e.target.value }))}
@@ -2138,7 +2125,7 @@ export default function App() {
                             type="number"
                             required
                             value={tripForm.truckCost}
-                            onChange={e => setTripForm(p => ({ ...p, truckCost: parseInt(e.target.value) || 0 }))}
+                            onChange={e => setTripForm(p => ({ ...p, truckCost: parseFloat(e.target.value) || 0 }))}
                             className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
                           />
                         </div>
@@ -2148,7 +2135,7 @@ export default function App() {
                             type="number"
                             required
                             value={tripForm.driverCut}
-                            onChange={e => setTripForm(p => ({ ...p, driverCut: parseInt(e.target.value) || 0 }))}
+                            onChange={e => setTripForm(p => ({ ...p, driverCut: parseFloat(e.target.value) || 0 }))}
                             className="w-full bg-slate-900 border border-slate-800 p-1.5 rounded text-slate-100"
                           />
                         </div>
@@ -2229,6 +2216,7 @@ export default function App() {
                         <label className="block text-slate-400 mb-1">{T.form.driverName}</label>
                         <input
                           type="text"
+                          required
                           placeholder={T.form.resaleDriverPlaceholder}
                           value={resaleForm.driverName}
                           onChange={e => setResaleForm(p => ({ ...p, driverName: e.target.value }))}
@@ -2269,7 +2257,7 @@ export default function App() {
                           type="number"
                           required
                           value={resaleForm.factoryPurchasePrice}
-                          onChange={e => setResaleForm(p => ({ ...p, factoryPurchasePrice: parseInt(e.target.value) || 0 }))}
+                          onChange={e => setResaleForm(p => ({ ...p, factoryPurchasePrice: parseFloat(e.target.value) || 0 }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100"
                         />
                       </div>
@@ -2348,7 +2336,7 @@ export default function App() {
                             type="number"
                             required
                             value={resaleForm.truckCost}
-                            onChange={e => setResaleForm(p => ({ ...p, truckCost: parseInt(e.target.value) || 0 }))}
+                            onChange={e => setResaleForm(p => ({ ...p, truckCost: parseFloat(e.target.value) || 0 }))}
                             className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
                           />
                         </div>
@@ -2358,7 +2346,7 @@ export default function App() {
                             type="number"
                             required
                             value={resaleForm.driverCost}
-                            onChange={e => setResaleForm(p => ({ ...p, driverCost: parseInt(e.target.value) || 0 }))}
+                            onChange={e => setResaleForm(p => ({ ...p, driverCost: parseFloat(e.target.value) || 0 }))}
                             className="w-full bg-slate-900 border border-slate-800 p-1 rounded text-slate-100"
                           />
                         </div>
@@ -2484,7 +2472,7 @@ export default function App() {
                           type="number"
                           required
                           value={expenseForm.amount}
-                          onChange={e => setExpenseForm(p => ({ ...p, amount: parseInt(e.target.value) || 0 }))}
+                          onChange={e => setExpenseForm(p => ({ ...p, amount: parseFloat(e.target.value) || 0 }))}
                           className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-slate-100 font-mono"
                         />
                       </div>
@@ -2675,7 +2663,7 @@ export default function App() {
                       </div>
                       <div className="flex justify-between py-1 text-slate-600 border-t border-slate-100">
                         <span>{T.receiptPreview.driverPaidLine(selectedReceipt.data.driverName || T.receiptPreview.unknownDriver)}</span>
-                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {selectedReceipt.data.driverCost.toLocaleString()} {T.common.currency}</span>
+                        <span className="font-mono">{(selectedReceipt.data.driverPaid || 0).toLocaleString()} / {(calcResale(selectedReceipt.data).trips * selectedReceipt.data.driverCost).toLocaleString()} {T.common.currency}</span>
                       </div>
                     </div>
                   </div>

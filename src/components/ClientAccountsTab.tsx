@@ -206,6 +206,21 @@ export function ClientAccountsTab({
     );
   }, [summaries]);
 
+
+  /** Print with the party's name as the document title, so the saved PDF is
+   *  named after the statement rather than after the application. */
+  const printStatement = () => {
+    const originalTitle = document.title;
+    const party = statementData?.clientName;
+    if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
+    const restoreTitle = () => {
+      document.title = originalTitle;
+      window.removeEventListener('afterprint', restoreTitle);
+    };
+    window.addEventListener('afterprint', restoreTitle);
+    window.print();
+  };
+
   return (
     <div className="space-y-6 dir-rtl">
       {/* Top Metrics Banner */}
@@ -690,7 +705,7 @@ export function ClientAccountsTab({
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => window.print()}
+                  onClick={printStatement}
                   className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1"
                 >
                   <Printer className="w-4 h-4" />

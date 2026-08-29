@@ -49,7 +49,7 @@ export interface MaterialResaleTx {
   tripCount: number;
   // Read-only: recomputed server-side from the payment ledgers. Never sent by forms.
   clientPaid: number;    // Amount the client has paid so far (toward clientSellingPrice)
-  driverPaid: number;    // Amount paid to the driver so far (toward driverCost)
+  driverPaid: number;    // Paid to the driver so far (toward tripCount × driverCost)
   // Computed fields (see src/resale-math.ts — one implementation, shared):
   // - Total Buy Cost       = factoryPurchasePrice * totalTonnage
   // - Total Sell Revenue   = productUnitPrice     * totalTonnage
@@ -194,6 +194,8 @@ export interface DriverSummary {
   totalAllocatedPaid: number;
   outstandingPayable: number;
   advanceBalance: number;
+  /** Paid beyond everything earned — the only part profit views deduct. */
+  unearnedAdvance: number;
   totalTripsCount: number;
   unpaidTripsCount: number;
 }
@@ -206,6 +208,7 @@ export interface DriverStatement {
     totalAllocatedPaid: number;
     outstandingPayable: number;
     advanceBalance: number;
+    unearnedAdvance: number;
   };
   itemizedTrips: Array<{
     type: 'transport' | 'resale';
@@ -275,7 +278,9 @@ export interface SupplierSummary {
   totalPaymentsGiven: number;
   totalAllocatedPaid: number;
   outstandingDebt: number;   // max(0, owed − paid): net semantics
-  prepaidBalance: number;    // max(0, paid − owed)
+  prepaidBalance: number;    // payments − drawn down (drawdown view)
+  /** Paid beyond everything owed — the only part profit views deduct. */
+  unmatchedPrepaid: number;
   shipmentsCount: number;
   unpaidCount: number;
 }
@@ -288,6 +293,7 @@ export interface SupplierStatement {
     totalAllocatedPaid: number;
     outstandingDebt: number;
     prepaidBalance: number;
+    unmatchedPrepaid: number;
   };
   itemized: Array<{
     type: 'resale' | 'invoice';

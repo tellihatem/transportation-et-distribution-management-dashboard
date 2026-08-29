@@ -44,3 +44,16 @@ export function tripCompanyProfit(t: TripFeeInputs): number {
  * so the two are read — and changed — together.
  */
 export const TRIP_CLIENT_FEE_SQL = 'truck_cost';
+
+/**
+ * Throw-friendly guard: money fields may be zero but never negative.
+ * (A wage above its hire is legal — a trip run at a loss — but a negative
+ * amount is always a typo, and unchecked it corrupts the ledgers: a negative
+ * fee makes work invisible to the FIFO sweeps while still moving the KPIs.)
+ */
+export function firstNegativeMoneyField(fields: Record<string, unknown>): string | null {
+  for (const [name, value] of Object.entries(fields)) {
+    if (value !== undefined && value !== null && Number(value) < 0) return name;
+  }
+  return null;
+}

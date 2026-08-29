@@ -63,6 +63,7 @@ const resales_1 = __importDefault(require("./routes/resales"));
 const expenses_1 = __importDefault(require("./routes/expenses"));
 const sync_1 = __importDefault(require("./routes/sync"));
 const backup_1 = __importDefault(require("./routes/backup"));
+const ledger_audit_1 = __importDefault(require("./routes/ledger-audit"));
 const client_payments_1 = __importDefault(require("./routes/client-payments"));
 const driver_payments_1 = __importDefault(require("./routes/driver-payments"));
 const suppliers_1 = require("./routes/suppliers");
@@ -199,6 +200,7 @@ app.use('/api/supplier-payments', suppliers_1.supplierPaymentsRouter);
 app.use('/api/supplier-invoices', suppliers_1.supplierInvoicesRouter);
 app.use('/api/sync', sync_1.default);
 app.use('/api/backup', backup_1.default);
+app.use('/api/health/ledger-audit', ledger_audit_1.default);
 // --- Serve React Frontend (Electron/Production mode) ---
 // Resolved relative to this compiled module (dist-server/index.js), not
 // process.cwd() — in the packaged Electron app, main.js chdir()s to the

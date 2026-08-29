@@ -8,9 +8,12 @@
  *     owing its goods cost: factory_purchase_price × total_tonnage
  *   - manual supplier invoices, for purchases made outside any resale record
  *
- * Balances are NET (per the operator's choice): a prepayment simply offsets
- * whatever is owed. FIFO allocation rows are written only when a payment is
- * recorded, walking unpaid resales AND invoices together, oldest first.
+ * Balances are DRAWDOWN, not net: an advance is money sitting with the
+ * supplier until the owner deducts it against a specific delivery, so debt
+ * and credit can legitimately show at once. FIFO allocation rows are written
+ * when a payment is recorded with mode 'auto', or by the manual /deduct
+ * endpoint — never automatically when work arrives (unlike the client and
+ * driver ledgers).
  *
  * Deliberately no queueSync here: the ledger tables have no Supabase mirror,
  * so syncing would be a no-op for upserts and an error-into-queue for
@@ -222,6 +225,11 @@ exports.supplierPaymentsRouter.get('/summary', (0, error_handler_1.asyncHandler)
         // down — which is the true position, not a contradiction.
         const outstandingDebt = Math.max(0, totalOwed - totalAllocatedPaid);
         const prepaidBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
+        // Paid beyond everything OWED — money out with no goods behind it, and
+        // therefore what the profit views deduct. prepaidBalance would
+        // double-count: once a delivery exists its cost is already inside the
+        // resale profit, whether or not the owner has drawn the advance down yet.
+        const unmatchedPrepaid = Math.max(0, totalPaymentsGiven - totalOwed);
         const shipmentsCount = resales.length + invoices.length;
         const unpaidCount = resales.filter(r => (r.supplier_paid ?? 0) < resaleSupplierCost(r)).length +
             invoices.filter(i => (i.paid ?? 0) < i.amount).length;
@@ -232,6 +240,7 @@ exports.supplierPaymentsRouter.get('/summary', (0, error_handler_1.asyncHandler)
             totalAllocatedPaid,
             outstandingDebt,
             prepaidBalance,
+            unmatchedPrepaid,
             shipmentsCount,
             unpaidCount
         };
@@ -281,6 +290,7 @@ exports.supplierPaymentsRouter.get('/statement/:supplierName', (0, error_handler
     // Drawdown semantics — see the summary endpoint.
     const outstandingDebt = Math.max(0, totalOwed - totalAllocatedPaid);
     const prepaidBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
+    const unmatchedPrepaid = Math.max(0, totalPaymentsGiven - totalOwed);
     res.json({
         success: true,
         data: {
@@ -290,7 +300,8 @@ exports.supplierPaymentsRouter.get('/statement/:supplierName', (0, error_handler
                 totalPaymentsGiven,
                 totalAllocatedPaid,
                 outstandingDebt,
-                prepaidBalance
+                prepaidBalance,
+                unmatchedPrepaid
             },
             itemized,
             payments: payments.map(p => ({
@@ -583,7 +594,7 @@ exports.supplierInvoicesRouter.delete('/:id', (0, error_handler_1.asyncHandler)(
     const deleteTx = database_1.default.transaction(() => {
         // The allocations that settled this invoice die with it; the paying
         // payments simply become unallocated again (their money returns to the
-        // supplier's net balance, which is recomputed live from the tables).
+        // supplier's available advance, ready to deduct against other deliveries.
         database_1.default.prepare(`DELETE FROM supplier_payment_allocations WHERE target_type = 'invoice' AND target_id = ?`).run(invoiceId);
         database_1.default.prepare('DELETE FROM supplier_invoices WHERE id = ?').run(invoiceId);
     });

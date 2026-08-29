@@ -17,7 +17,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RESALE_DRIVER_WAGE_SQL = void 0;
+exports.MONEY_EPSILON = exports.RESALE_DRIVER_WAGE_SQL = void 0;
 exports.syncTripClientPaid = syncTripClientPaid;
 exports.syncTripDriverPaid = syncTripDriverPaid;
 exports.allocateClientPayment = allocateClientPayment;
@@ -26,10 +26,18 @@ exports.applyClientCredit = applyClientCredit;
 exports.applyDriverAdvance = applyDriverAdvance;
 exports.releaseStaleAllocations = releaseStaleAllocations;
 exports.reconcileWork = reconcileWork;
+exports.manualAllocationError = manualAllocationError;
 const database_1 = __importDefault(require("./database"));
 const trip_math_1 = require("./trip-math");
 /** Per-trip driver wage: the resale table stores it per trip, not per deal. */
 exports.RESALE_DRIVER_WAGE_SQL = 'MAX(1, COALESCE(trip_count, 1)) * driver_cost';
+/**
+ * Money tolerance. Prices are unit × quantity with REAL quantities, so totals
+ * can carry float dust (…000000003). A strict `paid < fee` comparison would
+ * keep an exactly-paid invoice "unpaid" forever and make every sweep insert
+ * sub-centime allocation rows. Anything within half a centime is settled.
+ */
+exports.MONEY_EPSILON = 0.005;
 /** Recalculate a trip/resale's client_paid cache from the allocation rows. */
 function syncTripClientPaid(tripType, tripId) {
     const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
@@ -63,13 +71,13 @@ function unpaidClientWork(clientName) {
     const trips = database_1.default.prepare(`
     SELECT id, 'transport' as trip_type, date, ${trip_math_1.TRIP_CLIENT_FEE_SQL} as total_fee, client_paid as paid
     FROM client_trips
-    WHERE client_name = ? AND client_paid < ${trip_math_1.TRIP_CLIENT_FEE_SQL}
+    WHERE client_name = ? AND client_paid < ${trip_math_1.TRIP_CLIENT_FEE_SQL} - ${exports.MONEY_EPSILON}
     ORDER BY date ASC
   `).all(clientName);
     const resales = database_1.default.prepare(`
     SELECT id, 'resale' as trip_type, date, client_selling_price as total_fee, client_paid as paid
     FROM material_resales
-    WHERE end_client = ? AND client_paid < client_selling_price
+    WHERE end_client = ? AND client_paid < client_selling_price - ${exports.MONEY_EPSILON}
     ORDER BY date ASC
   `).all(clientName);
     return [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
@@ -79,13 +87,13 @@ function unpaidDriverWork(driverName) {
     const trips = database_1.default.prepare(`
     SELECT id, 'transport' as trip_type, date, driver_cut as total_fee, driver_paid as paid
     FROM client_trips
-    WHERE driver_name = ? AND driver_paid < driver_cut
+    WHERE driver_name = ? AND driver_paid < driver_cut - ${exports.MONEY_EPSILON}
     ORDER BY date ASC
   `).all(driverName);
     const resales = database_1.default.prepare(`
     SELECT id, 'resale' as trip_type, date, ${exports.RESALE_DRIVER_WAGE_SQL} as total_fee, driver_paid as paid
     FROM material_resales
-    WHERE driver_name = ? AND driver_paid < ${exports.RESALE_DRIVER_WAGE_SQL}
+    WHERE driver_name = ? AND driver_paid < ${exports.RESALE_DRIVER_WAGE_SQL} - ${exports.MONEY_EPSILON}
     ORDER BY date ASC
   `).all(driverName);
     return [...trips, ...resales].sort((a, b) => a.date.localeCompare(b.date));
@@ -100,7 +108,7 @@ function allocateClientPayment(paymentId, clientName, amount) {
         if (remaining <= 0)
             break;
         const due = item.total_fee - (item.paid ?? 0);
-        if (due <= 0)
+        if (due <= exports.MONEY_EPSILON)
             continue;
         const allocAmt = Math.min(due, remaining);
         database_1.default.prepare(`
@@ -118,7 +126,7 @@ function allocateDriverPayment(paymentId, driverName, amount) {
         if (remaining <= 0)
             break;
         const due = item.total_fee - (item.paid ?? 0);
-        if (due <= 0)
+        if (due <= exports.MONEY_EPSILON)
             continue;
         const allocAmt = Math.min(due, remaining);
         database_1.default.prepare(`
@@ -139,7 +147,7 @@ function unappliedPayments(table, allocTable, nameColumn, name) {
     FROM ${table} p
     WHERE p.${nameColumn} = ?
     ORDER BY p.date ASC, p.id ASC
-  `).all(name).filter((p) => p.unapplied > 0);
+  `).all(name).filter((p) => p.unapplied > exports.MONEY_EPSILON);
 }
 /**
  * Settle this client's outstanding work with any credit they are holding.
@@ -221,4 +229,39 @@ function reconcileWork(opts) {
         applyClientCredit(name);
     for (const name of new Set((opts.driverNames ?? []).filter(Boolean)))
         applyDriverAdvance(name);
+}
+/**
+ * Validate one manual allocation before it is written: the target must exist,
+ * belong to the named party, and still have room for the amount. Returns an
+ * error string, or null when the allocation is sound. Without this, a typo'd
+ * trip id or an over-allocation survives until the next work edit — which
+ * then wipes EVERY allocation on that row, correct ones included.
+ */
+function manualAllocationError(side, partyName, tripType, tripId, amount) {
+    const table = tripType === 'transport' ? 'client_trips' : 'material_resales';
+    const row = database_1.default.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(tripId);
+    if (!row)
+        return `target ${tripId} does not exist`;
+    if (side === 'client') {
+        const owner = tripType === 'transport' ? row.client_name : row.end_client;
+        if (owner !== partyName)
+            return `target ${tripId} belongs to ${owner || 'no one'}, not ${partyName}`;
+        const fee = tripType === 'transport'
+            ? (0, trip_math_1.tripClientFee)({ truckCost: row.truck_cost })
+            : (row.client_selling_price ?? 0);
+        if ((row.client_paid ?? 0) + amount > fee + exports.MONEY_EPSILON) {
+            return `target ${tripId} only has ${fee - (row.client_paid ?? 0)} remaining`;
+        }
+    }
+    else {
+        if (row.driver_name !== partyName)
+            return `target ${tripId} belongs to ${row.driver_name || 'no one'}, not ${partyName}`;
+        const wage = tripType === 'transport'
+            ? (row.driver_cut ?? 0)
+            : Math.max(1, row.trip_count ?? 1) * (row.driver_cost ?? 0);
+        if ((row.driver_paid ?? 0) + amount > wage + exports.MONEY_EPSILON) {
+            return `target ${tripId} only has ${wage - (row.driver_paid ?? 0)} remaining`;
+        }
+    }
+    return null;
 }

@@ -46,6 +46,14 @@ function purgeSqlFile() {
  */
 function purgeLegacySeedRows(db) {
     db.exec(fs_1.default.readFileSync(purgeSqlFile(), 'utf-8'));
+    // 007 predates the supplier ledger, so its SQL clears only the client and
+    // driver allocation tables. Clear supplier allocations aimed at the seed
+    // resales too, or the deleted rows leave orphans behind (see migration 013).
+    db.exec(`
+    DELETE FROM supplier_payment_allocations
+    WHERE target_type = 'resale'
+      AND target_id NOT IN (SELECT id FROM material_resales);
+  `);
 }
 /**
  * Queue Supabase deletes for every canonical seed id, so the cloud mirror is

@@ -27,6 +27,7 @@ import resalesRouter from './routes/resales';
 import expensesRouter from './routes/expenses';
 import syncRouter from './routes/sync';
 import backupRouter from './routes/backup';
+import ledgerAuditRouter from './routes/ledger-audit';
 import clientPaymentsRouter from './routes/client-payments';
 import driverPaymentsRouter from './routes/driver-payments';
 import { supplierPaymentsRouter, supplierInvoicesRouter } from './routes/suppliers';
@@ -177,6 +178,7 @@ app.use('/api/supplier-payments', supplierPaymentsRouter);
 app.use('/api/supplier-invoices', supplierInvoicesRouter);
 app.use('/api/sync', syncRouter);
 app.use('/api/backup', backupRouter);
+app.use('/api/health/ledger-audit', ledgerAuditRouter);
 
 // --- Serve React Frontend (Electron/Production mode) ---
 // Resolved relative to this compiled module (dist-server/index.js), not

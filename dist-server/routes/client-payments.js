@@ -10,9 +10,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
-const replicator_1 = require("../sync/replicator");
 const ledgers_1 = require("../ledgers");
 const trip_math_1 = require("../trip-math");
+// NOTE deliberately no queueSync here: the payment/allocation tables are
+// local-only (no Supabase mirror). Queuing deletes for them errors into
+// sync_queue and retries forever — see server/routes/suppliers.ts for the
+// same decision documented on the supplier ledger.
 const router = (0, express_1.Router)();
 /**
  * GET /api/client-payments — List all client payments with allocations
@@ -228,6 +231,12 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
                 const allocAmt = Math.min(alloc.amount, remainingToAllocate);
                 if (allocAmt <= 0)
                     break;
+                // A bad manual row must fail loudly now, not poison the ledger until
+                // the next work edit tears down the whole row's allocations.
+                const problem = (0, ledgers_1.manualAllocationError)('client', clientName, alloc.tripType, alloc.tripId, allocAmt);
+                if (problem) {
+                    throw (0, error_handler_1.createApiError)(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+                }
                 database_1.default.prepare(`
           INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount)
           VALUES (?, ?, ?, ?)
@@ -243,7 +252,6 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     });
     executePaymentTx();
     const created = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(id);
-    (0, replicator_1.queueSync)('client_payments', id, 'upsert', created);
     res.status(201).json({ success: true, data: created });
 }));
 /**
@@ -259,7 +267,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Payment not found', 404, 'NOT_FOUND');
-    const { date, clientName, amount, paymentMethod, notes, allocationMode } = req.body;
+    const { date, clientName, amount, paymentMethod, notes, allocationMode, allocations } = req.body;
     if (!date || !clientName || !amount || amount <= 0) {
         throw (0, error_handler_1.createApiError)('Missing required fields: date, clientName, amount', 400, 'VALIDATION_ERROR');
     }
@@ -281,8 +289,32 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         if (allocationMode === 'auto') {
             (0, ledgers_1.allocateClientPayment)(paymentId, clientName, amount);
         }
+        else if (allocationMode === 'manual' && Array.isArray(allocations)) {
+            // Same rules as POST — an edited receipt may keep hand-placed rows
+            // rather than silently converting them into an advance.
+            let remainingToAllocate = amount;
+            for (const alloc of allocations) {
+                if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0)
+                    continue;
+                const allocAmt = Math.min(alloc.amount, remainingToAllocate);
+                if (allocAmt <= 0)
+                    break;
+                const problem = (0, ledgers_1.manualAllocationError)('client', clientName, alloc.tripType, alloc.tripId, allocAmt);
+                if (problem)
+                    throw (0, error_handler_1.createApiError)(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+                database_1.default.prepare(`INSERT INTO client_payment_allocations (payment_id, trip_type, trip_id, amount) VALUES (?, ?, ?, ?)`)
+                    .run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
+                (0, ledgers_1.syncTripClientPaid)(alloc.tripType, alloc.tripId);
+                remainingToAllocate -= allocAmt;
+            }
+        }
     });
     updateTx();
+    // Work the old allocations were covering may be unpaid again, and if the
+    // payment moved to another client, both parties' credit must resettle.
+    (0, ledgers_1.applyClientCredit)(existing.client_name);
+    if (clientName !== existing.client_name)
+        (0, ledgers_1.applyClientCredit)(clientName);
     const updated = database_1.default.prepare('SELECT * FROM client_payments WHERE id = ?').get(paymentId);
     res.json({ success: true, data: updated });
 }));
@@ -309,7 +341,10 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         }
     });
     deleteTx();
-    (0, replicator_1.queueSync)('client_payments', paymentId, 'delete', null);
+    // The trips this payment covered are unpaid again. If the client holds any
+    // other unapplied credit, it belongs on them now — the same sweep every
+    // work-side write performs.
+    (0, ledgers_1.applyClientCredit)(existing.client_name);
     res.json({ success: true, message: 'Payment deleted and allocations reverted' });
 }));
 exports.default = router;

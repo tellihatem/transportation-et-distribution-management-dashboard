@@ -10,8 +10,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const database_1 = __importDefault(require("../database"));
 const error_handler_1 = require("../middleware/error-handler");
-const replicator_1 = require("../sync/replicator");
 const ledgers_1 = require("../ledgers");
+// NOTE deliberately no queueSync here: the payment/allocation tables are
+// local-only (no Supabase mirror). Queuing deletes for them errors into
+// sync_queue and retries forever — see server/routes/suppliers.ts for the
+// same decision documented on the supplier ledger.
 const router = (0, express_1.Router)();
 /**
  * What a driver is owed for one resale.
@@ -119,8 +122,16 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
         const payments = database_1.default.prepare('SELECT * FROM driver_payments WHERE driver_name = ?').all(name);
         const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
         const totalAllocatedPaid = transportPaid + resalePaid;
+        // Not yet applied to any trip — the figure the drawdown views track.
         const advanceBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-        const outstandingPayable = Math.max(0, totalEarned - totalPaymentsGiven);
+        // Paid beyond everything EARNED — the only part that is money out with no
+        // work behind it, and therefore the only part the profit views deduct.
+        // (advanceBalance would double-count: an unallocated payment against an
+        // earned wage is a bookkeeping gap, not missing money.)
+        const unearnedAdvance = Math.max(0, totalPaymentsGiven - totalEarned);
+        // Work done and not settled. Allocation basis, matching the client and
+        // supplier ledgers — an advance sitting unapplied does not hide it.
+        const outstandingPayable = Math.max(0, totalEarned - totalAllocatedPaid);
         const totalTripsCount = trips.length + resales.length;
         const unpaidTripsCount = trips.filter(t => (t.driver_paid ?? 0) < t.driver_cut).length +
             resales.filter(r => (r.driver_paid ?? 0) < resaleDriverWage(r)).length;
@@ -131,6 +142,7 @@ router.get('/summary', (0, error_handler_1.asyncHandler)(async (_req, res) => {
             totalAllocatedPaid,
             outstandingPayable,
             advanceBalance,
+            unearnedAdvance,
             totalTripsCount,
             unpaidTripsCount
         };
@@ -177,7 +189,8 @@ router.get('/statement/:driverName', (0, error_handler_1.asyncHandler)(async (re
     const totalAllocatedPaid = itemizedTrips.reduce((sum, item) => sum + item.driverPaid, 0);
     const totalPaymentsGiven = payments.reduce((sum, p) => sum + p.amount, 0);
     const advanceBalance = Math.max(0, totalPaymentsGiven - totalAllocatedPaid);
-    const outstandingPayable = Math.max(0, totalEarned - totalPaymentsGiven);
+    const unearnedAdvance = Math.max(0, totalPaymentsGiven - totalEarned);
+    const outstandingPayable = Math.max(0, totalEarned - totalAllocatedPaid);
     res.json({
         success: true,
         data: {
@@ -187,7 +200,8 @@ router.get('/statement/:driverName', (0, error_handler_1.asyncHandler)(async (re
                 totalPaymentsGiven,
                 totalAllocatedPaid,
                 outstandingPayable,
-                advanceBalance
+                advanceBalance,
+                unearnedAdvance
             },
             itemizedTrips,
             payments: payments.map(p => ({
@@ -234,6 +248,12 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
                 const allocAmt = Math.min(alloc.amount, remainingToAllocate);
                 if (allocAmt <= 0)
                     break;
+                // A bad manual row must fail loudly now, not poison the ledger until
+                // the next work edit tears down the whole row's allocations.
+                const problem = (0, ledgers_1.manualAllocationError)('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
+                if (problem) {
+                    throw (0, error_handler_1.createApiError)(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+                }
                 database_1.default.prepare(`
           INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount)
           VALUES (?, ?, ?, ?)
@@ -249,7 +269,6 @@ router.post('/', (0, error_handler_1.asyncHandler)(async (req, res) => {
     });
     executePaymentTx();
     const created = database_1.default.prepare('SELECT * FROM driver_payments WHERE id = ?').get(id);
-    (0, replicator_1.queueSync)('driver_payments', id, 'upsert', created);
     res.status(201).json({ success: true, data: created });
 }));
 /**
@@ -267,7 +286,7 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
     const existing = database_1.default.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId);
     if (!existing)
         throw (0, error_handler_1.createApiError)('Payment not found', 404, 'NOT_FOUND');
-    const { date, driverName, amount, paymentType, notes, allocationMode } = req.body;
+    const { date, driverName, amount, paymentType, notes, allocationMode, allocations } = req.body;
     if (!date || !driverName || !amount || amount <= 0) {
         throw (0, error_handler_1.createApiError)('Missing required fields: date, driverName, amount', 400, 'VALIDATION_ERROR');
     }
@@ -291,8 +310,28 @@ router.put('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         if (allocationMode === 'auto') {
             (0, ledgers_1.allocateDriverPayment)(paymentId, driverName, amount);
         }
+        else if (allocationMode === 'manual' && Array.isArray(allocations)) {
+            let remainingToAllocate = amount;
+            for (const alloc of allocations) {
+                if (!alloc.tripId || !alloc.tripType || alloc.amount <= 0)
+                    continue;
+                const allocAmt = Math.min(alloc.amount, remainingToAllocate);
+                if (allocAmt <= 0)
+                    break;
+                const problem = (0, ledgers_1.manualAllocationError)('driver', driverName, alloc.tripType, alloc.tripId, allocAmt);
+                if (problem)
+                    throw (0, error_handler_1.createApiError)(`Invalid allocation: ${problem}`, 400, 'VALIDATION_ERROR');
+                database_1.default.prepare(`INSERT INTO driver_payment_allocations (payment_id, trip_type, trip_id, amount) VALUES (?, ?, ?, ?)`)
+                    .run(paymentId, alloc.tripType, alloc.tripId, allocAmt);
+                (0, ledgers_1.syncTripDriverPaid)(alloc.tripType, alloc.tripId);
+                remainingToAllocate -= allocAmt;
+            }
+        }
     });
     updateTx();
+    (0, ledgers_1.applyDriverAdvance)(existing.driver_name);
+    if (driverName !== existing.driver_name)
+        (0, ledgers_1.applyDriverAdvance)(driverName);
     const updated = database_1.default.prepare('SELECT * FROM driver_payments WHERE id = ?').get(paymentId);
     res.json({ success: true, data: updated });
 }));
@@ -315,7 +354,9 @@ router.delete('/:id', (0, error_handler_1.asyncHandler)(async (req, res) => {
         }
     });
     deleteTx();
-    (0, replicator_1.queueSync)('driver_payments', paymentId, 'delete', null);
+    // Same sweep as on the client side: freed wages resettle from any other
+    // credit the driver still holds.
+    (0, ledgers_1.applyDriverAdvance)(existing.driver_name);
     res.json({ success: true, message: 'Driver payout deleted and allocations reverted' });
 }));
 exports.default = router;

@@ -81,12 +81,15 @@ async function restoreFromSupabase() {
                 insertTrip.run(t.id, t.date, t.client_name, t.origin_factory, t.destination, t.material_type, t.total_tonnage, t.quantity_unit ?? 'طن', t.truck_cost, t.driver_cut, t.company_profit, t.driver_name ?? '', t.created_at || new Date().toISOString(), t.updated_at || new Date().toISOString());
             }
             // Insert resales
+            // Every money-bearing column must survive a restore. product_unit_price
+            // and trip_count were once dropped here, which zeroed the sell revenue
+            // and collapsed multi-trip deliveries to one trip's transport and wage.
             const insertResale = database_1.default.prepare(`
-        INSERT INTO material_resales (id, date, end_client, destination, material_type, origin_factory, factory_purchase_price, total_tonnage, quantity_unit, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, created_at, updated_at, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO material_resales (id, date, end_client, destination, material_type, origin_factory, factory_purchase_price, product_unit_price, total_tonnage, quantity_unit, client_selling_price, truck_cost, driver_cost, explicit_profit, driver_name, trip_count, created_at, updated_at, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `);
             for (const r of resales) {
-                insertResale.run(r.id, r.date, r.end_client, r.destination ?? '', r.material_type ?? '', r.origin_factory ?? '', r.factory_purchase_price, r.total_tonnage, r.quantity_unit ?? 'طن', r.client_selling_price, r.truck_cost, r.driver_cost, r.explicit_profit, r.driver_name ?? '', r.created_at || new Date().toISOString(), r.updated_at || new Date().toISOString());
+                insertResale.run(r.id, r.date, r.end_client, r.destination ?? '', r.material_type ?? '', r.origin_factory ?? '', r.factory_purchase_price, r.product_unit_price ?? 0, r.total_tonnage, r.quantity_unit ?? 'طن', r.client_selling_price, r.truck_cost, r.driver_cost, r.explicit_profit, r.driver_name ?? '', Math.max(1, r.trip_count ?? 1), r.created_at || new Date().toISOString(), r.updated_at || new Date().toISOString());
             }
             // Insert expenses
             const insertExpense = database_1.default.prepare(`
