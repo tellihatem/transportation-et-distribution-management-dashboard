@@ -69,7 +69,7 @@ import { ExecutiveOverviewTab } from "./components/ExecutiveOverviewTab";
 import { chartTheme } from "./chart-theme";
 import { EntryModal } from "./components/EntryModal";
 import { tripClientFee, tripCompanyProfit } from "../server/trip-math";
-import { downloadBackup, importBackup, resetAllData, fetchTripById, fetchResaleById } from "./api/client";
+import { downloadBackup, importBackup, resetAllData, fetchTripById, fetchResaleById, fetchExpenseStats } from "./api/client";
 import logoUrl from "../assets/logo.png";
 import { T } from "./strings";
 import { calcResale } from "../server/resale-math";
@@ -138,12 +138,24 @@ export default function App() {
   // header badge and in the reset dialog.
   const appInfo = useAppInfo();
 
+  // All-time expense totals for the cash headline. The expenses list above is
+  // filtered to the selected period, but the till doesn't reset when the month
+  // filter moves — so the deck needs the unfiltered Paid total from the server.
+  const [allTimeExpenseTotals, setAllTimeExpenseTotals] = useState({ paid: 0, pending: 0 });
+  const reloadAllTimeExpenses = () => {
+    fetchExpenseStats()
+      .then(s => setAllTimeExpenseTotals({ paid: s.totalOverhead, pending: s.pendingAmount }))
+      .catch(() => { /* keep the last known totals; the next refresh retries */ });
+  };
+  useEffect(() => { reloadAllTimeExpenses(); }, []);
+
   const refreshAllData = () => {
     reloadTrips();
     reloadResales();
     reloadClientPayments();
     reloadDriverPayments();
     reloadSupplierPayments();
+    reloadAllTimeExpenses();
   };
 
   // --- Active Tab State ---
@@ -336,7 +348,21 @@ export default function App() {
     receivable: clientSummaries.reduce((sum, c) => sum + c.outstandingReceivable, 0),
     driverSettled: driverSummaries.reduce((sum, d) => sum + d.totalPaymentsGiven, 0),
     driverPayable: driverSummaries.reduce((sum, d) => sum + d.outstandingPayable, 0),
+    supplierSettled: supplierSummaries.reduce((sum, sup) => sum + sup.totalPaymentsGiven, 0),
+    supplierPayable: supplierSummaries.reduce((sum, sup) => sum + sup.outstandingDebt, 0),
   };
+
+  // THE headline number: actual money flow. Everything the clients have put
+  // in, minus everything that has gone out — to drivers, to factories, and on
+  // paid expenses. It moves the moment any payment is recorded, in either
+  // direction, which is what the owner means by "the profit is the source
+  // money of the company". The invoiced (accrual) figure above stays as the
+  // clearly-labelled secondary line.
+  const masterCashNet =
+    periodCash.collected
+    - periodCash.driverSettled
+    - periodCash.supplierSettled
+    - allTimeExpenseTotals.paid;
 
   // --- Add / Edit Records Logic ---
   // IDs are sequential (TR-1, TR-2, ...), computed server-side from the full
@@ -879,56 +905,52 @@ export default function App() {
                 {/* Mathematical visual schema */}
                 <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-300">
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">{T.master.transportProfit}</span>
-                    <span className="text-emerald-400 font-bold font-mono">+{tab1Stats.netMargin.toLocaleString()} {T.common.currency}</span>
-                  </div>
-                  <span className="text-slate-600 font-bold text-lg">+</span>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">{T.master.resaleProfit}</span>
-                    <span className="text-emerald-400 font-bold font-mono">+{tab2Stats.totalTrueProfit.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.master.cashInClients}</span>
+                    <span className="text-emerald-400 font-bold font-mono">+{periodCash.collected.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <span className="text-slate-600 font-bold text-lg">-</span>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">{T.master.fleetExpenses}</span>
-                    <span className="text-rose-400 font-bold font-mono">-{tab3Stats.totalOverhead.toLocaleString()} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.master.cashOutDrivers}</span>
+                    <span className="text-rose-400 font-bold font-mono">-{periodCash.driverSettled.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <span className="text-slate-600 font-bold text-lg">-</span>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">{T.master.driverAdvancesOut}</span>
-                    <span className="text-rose-400 font-bold font-mono">{driverAdvancesOut > 0 ? `-${driverAdvancesOut.toLocaleString()}` : "0"} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.master.cashOutSuppliers}</span>
+                    <span className="text-rose-400 font-bold font-mono">-{periodCash.supplierSettled.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <span className="text-slate-600 font-bold text-lg">-</span>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500">{T.master.supplierPrepaidOut}</span>
-                    <span className="text-rose-400 font-bold font-mono">{supplierPrepaidOut > 0 ? `-${supplierPrepaidOut.toLocaleString()}` : "0"} {T.common.currency}</span>
+                    <span className="text-[10px] text-slate-500">{T.master.cashOutExpenses}</span>
+                    <span className="text-rose-400 font-bold font-mono">-{allTimeExpenseTotals.paid.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <span className="text-slate-500 font-bold text-lg">=</span>
                   <div className="bg-slate-800/40 px-3 py-1 rounded border border-slate-700 flex flex-col">
-                    <span className="text-[10px] text-cyan-400 font-bold">{T.master.netProfit}</span>
-                    <span className={`font-mono font-bold text-base ${masterNetProfit >= 0 ? 'text-cyan-300' : 'text-rose-400'}`}>
-                      {masterNetProfit.toLocaleString()} {T.common.currency}
+                    <span className="text-[10px] text-cyan-400 font-bold">{T.master.netCash}</span>
+                    <span className={`font-mono font-bold text-base ${masterCashNet >= 0 ? 'text-cyan-300' : 'text-rose-400'}`}>
+                      {masterCashNet.toLocaleString()} {T.common.currency}
                     </span>
                   </div>
                 </div>
 
-                {/* Actual cash position — profit above is accrued, this is what
-                    has really been collected/paid according to the ledgers. */}
+                {/* What has NOT moved yet — the pending complement of each
+                    cash term above: still owed by clients, still owed to
+                    drivers/factories, expenses awaiting approval. */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[10px] text-slate-500 block">{T.master.cashCollected}</span>
-                    <span className="text-emerald-400 font-bold font-mono text-sm">{periodCash.collected.toLocaleString()} {T.common.currency}</span>
-                  </div>
                   <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
                     <span className="text-[10px] text-slate-500 block">{T.master.cashReceivable}</span>
                     <span className="text-amber-400 font-bold font-mono text-sm">{periodCash.receivable.toLocaleString()} {T.common.currency}</span>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[10px] text-slate-500 block">{T.master.driverPaid}</span>
-                    <span className="text-blue-400 font-bold font-mono text-sm">{periodCash.driverSettled.toLocaleString()} {T.common.currency}</span>
-                  </div>
-                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
                     <span className="text-[10px] text-slate-500 block">{T.master.driverPayable}</span>
                     <span className="text-rose-400 font-bold font-mono text-sm">{periodCash.driverPayable.toLocaleString()} {T.common.currency}</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+                    <span className="text-[10px] text-slate-500 block">{T.master.supplierPayable}</span>
+                    <span className="text-rose-400 font-bold font-mono text-sm">{periodCash.supplierPayable.toLocaleString()} {T.common.currency}</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+                    <span className="text-[10px] text-slate-500 block">{T.master.pendingExpensesBox}</span>
+                    <span className="text-blue-400 font-bold font-mono text-sm">{allTimeExpenseTotals.pending.toLocaleString()} {T.common.currency}</span>
                   </div>
                 </div>
               </div>
@@ -938,16 +960,21 @@ export default function App() {
                 <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">{T.master.periodProfitTitle}</p>
 
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className={`text-4xl font-black font-mono tracking-tight ${masterNetProfit >= 0 ? 'text-emerald-400 drop-shadow-[0_0_12px_rgba(34,197,94,0.2)]' : 'text-rose-500'}`}>
-                    {masterNetProfit.toLocaleString()}
+                  <span className={`text-4xl font-black font-mono tracking-tight ${masterCashNet >= 0 ? 'text-emerald-400 drop-shadow-[0_0_12px_rgba(34,197,94,0.2)]' : 'text-rose-500'}`}>
+                    {masterCashNet.toLocaleString()}
                   </span>
                   <span className="text-sm text-slate-400">{T.common.currency}</span>
                 </div>
 
-                <p className="mt-1 text-[10px] text-slate-500">{T.master.accrualNote}</p>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {T.master.invoicedProfitLabel}{' '}
+                  <span className={`font-mono font-bold ${masterNetProfit >= 0 ? 'text-slate-300' : 'text-rose-400'}`}>
+                    {masterNetProfit.toLocaleString()} {T.common.currency}
+                  </span>
+                </p>
 
                 <div className="mt-3 flex items-center justify-center gap-1.5 py-1 px-3.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300">
-                  {masterNetProfit >= 0 ? (
+                  {masterCashNet >= 0 ? (
                     <>
                       <TrendingUp className="h-4 w-4 text-emerald-400" />
                       <span>{T.master.healthy}</span>
@@ -1116,6 +1143,7 @@ export default function App() {
                   clientSummaries={clientSummaries}
                   driverSummaries={driverSummaries}
                   supplierSummaries={supplierSummaries}
+                  allTimeExpensesPaid={allTimeExpenseTotals.paid}
                   onNavigateTab={tab => setActiveTab(tab)}
                   charts={charts}
                 />

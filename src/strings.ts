@@ -107,6 +107,7 @@ export const T = {
     netProfit: "صافي أرباح الشركة الفعلي",
     /** Sub-line of card 2: net profit as a percentage. */
     netMarginLabel: "هامش الربح الصافي:",
+    accruedProfitLabel: "الربح المحتسب (فواتير):",
     /** KPI card 3 title: money clients still owe the company. */
     clientReceivables: "مستحقات عند العملاء (ديون)",
     /** Sub-line of card 3: money clients paid in advance, not yet used. */
@@ -128,7 +129,7 @@ export const T = {
       clientDebts: "ديون العملاء",
       driverPayouts: "مدفوعات السائقين",
       operatingCosts: "مصاريف تشغيلية",
-      netProfit: "صافي الربح الفعلي",
+      netProfit: "صافي التدفق النقدي",
     },
 
     /** Title of the quick-links panel on the right. */
@@ -704,8 +705,11 @@ export const T = {
    *  لوحة المعادلة المالية — The profit formula panel at the top of every screen
    * ──────────────────────────────────────────────────────────────────────── */
   master: {
-    periodBadge: "الملخص المالي الشامل للفترة المحددة",
-    title: "معادلة صافي ربح الشركة",
+    /** The headline is CASH over all time — the till does not reset when
+     *  the date filter moves. The invoiced (accrual) figure is the smaller
+     *  period-scoped line underneath. */
+    periodBadge: "الملخص المالي الشامل — حركة الأموال (كل الفترات)",
+    title: "معادلة صافي أموال الشركة (التدفق النقدي)",
     /** The three inputs and the result of the profit formula. */
     transportProfit: "أرباح رحلات نقل العملاء",
     resaleProfit: "أرباح بيع وتوصيل المواد",
@@ -715,20 +719,31 @@ export const T = {
     driverAdvancesOut: "سلف السائقين غير المستردة",
     supplierPrepaidOut: "دفعات مسبقة لدى الموردين",
     netProfit: "صافي ربح الشركة",
+    /** The four cash terms and their result. */
+    cashInClients: "المقبوض من العملاء",
+    cashOutDrivers: "المدفوع للسائقين",
+    cashOutSuppliers: "المدفوع للموردين",
+    cashOutExpenses: "المصاريف المدفوعة",
+    netCash: "صافي النقد في الخزينة",
     /** The four cash-position boxes underneath the formula. */
     /** The four boxes and the two advance terms are BALANCES over all time,
      *  not period flows — the date filter deliberately does not move them. */
     cashCollected: "المحصّل من العملاء (إجمالي)",
     cashReceivable: "متبقي على العملاء (إجمالي)",
+    supplierPayable: "مستحقات الموردين (إجمالي)",
+    pendingExpensesBox: "مصاريف قيد الدراسة",
     driverPaid: "المدفوع للسائقين (إجمالي)",
     driverPayable: "متبقي للسائقين (إجمالي)",
     /** The large profit figure on the right of the panel. */
-    periodProfitTitle: "صافي ربح الشركة خلال الفترة",
+    periodProfitTitle: "صافي أموال الشركة (نقداً)",
     /** Reminder that the profit above is invoiced, not cash in hand. */
-    accrualNote: "ربح محتسب على الفواتير، وليس نقداً في الخزينة",
+    /** The secondary line under the big cash figure: the accrual profit
+     *  computed on invoices for the SELECTED PERIOD — what the business made
+     *  on paper, whether or not the money has moved yet. */
+    invoicedProfitLabel: "الربح المحتسب على الفواتير (للفترة):",
     /** Health line: shown when profitable / when costs exceed margins. */
-    healthy: "الموازنة في حالة كفاءة وربحية إيجابية",
-    unhealthy: "المصاريف تتخطى هوامش الربح الحالية",
+    healthy: "الخزينة موجبة — المقبوض يغطي كل المدفوع",
+    unhealthy: "المدفوع يتخطى المقبوض — الخزينة بالسالب",
     /** Warning strip: how much is still uncollected from clients. */
     uncollectedSuffix: "لم تُحصّل بعد من العملاء",
   },

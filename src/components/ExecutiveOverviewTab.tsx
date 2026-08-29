@@ -49,6 +49,9 @@ interface ExecutiveOverviewTabProps {
   clientSummaries: ClientSummary[];
   driverSummaries: DriverSummary[];
   supplierSummaries: SupplierSummary[];
+  /** All-time Paid expenses from /expenses/stats — the expenses prop is
+   *  period-filtered, but the cash headline never resets with the filter. */
+  allTimeExpensesPaid: number;
   onNavigateTab: (tab: 'transport' | 'resale' | 'expenses' | 'clients' | 'drivers' | 'suppliers') => void;
   /** Chart colours for the active theme — see src/chart-theme.ts. */
   charts: ChartTheme;
@@ -63,6 +66,7 @@ export function ExecutiveOverviewTab({
   clientSummaries,
   driverSummaries,
   supplierSummaries,
+  allTimeExpensesPaid,
   onNavigateTab,
   charts
 }: ExecutiveOverviewTabProps) {
@@ -132,6 +136,13 @@ export function ExecutiveOverviewTab({
     // Margin %
     const netProfitMarginPercent = grossInvoicedTurnover > 0 ? (netOperatingProfit / grossInvoicedTurnover) * 100 : 0;
 
+    // THE headline: actual money flow (all figures above from the all-time
+    // ledgers, expenses from the unfiltered stats endpoint) — identical to
+    // masterCashNet on the formula deck, so the two screens can never
+    // disagree about how much money the company really holds.
+    const supplierPayoutsGiven = supplierSummaries.reduce((sum, sp) => sum + sp.totalPaymentsGiven, 0);
+    const netCashFlow = clientCashCollected - driverPayoutsGiven - supplierPayoutsGiven - allTimeExpensesPaid;
+
     return {
       grossInvoicedTurnover,
       clientCashCollected,
@@ -149,12 +160,14 @@ export function ExecutiveOverviewTab({
       grossDirectProfit,
       netOperatingProfit,
       netProfitMarginPercent,
+      supplierPayoutsGiven,
+      netCashFlow,
 
       transportTons,
       resaleTons,
       totalTons: transportTons + resaleTons
     };
-  }, [trips, resales, expenses, clientSummaries, driverSummaries, supplierSummaries]);
+  }, [trips, resales, expenses, clientSummaries, driverSummaries, supplierSummaries, allTimeExpensesPaid]);
 
   // Chart data: Monthly Cashflow comparison
   const cashflowChartData = useMemo(() => {
@@ -164,7 +177,7 @@ export function ExecutiveOverviewTab({
       { name: T.overview.chartBars.clientDebts, value: metrics.clientOutstandingReceivable, fill: '#f59e0b' },
       { name: T.overview.chartBars.driverPayouts, value: metrics.driverPayoutsGiven, fill: '#06b6d4' },
       { name: T.overview.chartBars.operatingCosts, value: metrics.totalOperationalBurdens, fill: '#ef4444' },
-      { name: T.overview.chartBars.netProfit, value: metrics.netOperatingProfit, fill: '#8b5cf6' },
+      { name: T.overview.chartBars.netProfit, value: metrics.netCashFlow, fill: '#8b5cf6' },
     ];
   }, [metrics]);
 
@@ -194,12 +207,12 @@ export function ExecutiveOverviewTab({
             <span>{T.overview.netProfit}</span>
             <TrendingUp className="w-5 h-5 text-emerald-400" />
           </div>
-          <div className="text-3xl font-extrabold text-emerald-300 font-mono">
-            {metrics.netOperatingProfit.toLocaleString()} <span className="text-sm font-normal text-emerald-500">{T.common.currency}</span>
+          <div className={`text-3xl font-extrabold font-mono ${metrics.netCashFlow >= 0 ? 'text-emerald-300' : 'text-rose-400'}`}>
+            {metrics.netCashFlow.toLocaleString()} <span className="text-sm font-normal text-emerald-500">{T.common.currency}</span>
           </div>
           <div className="mt-3 pt-3 border-t border-emerald-900/60 flex items-center justify-between text-xs">
-            <span className="text-emerald-400/80">{T.overview.netMarginLabel}</span>
-            <span className="font-bold text-emerald-300 font-mono">{metrics.netProfitMarginPercent.toFixed(1)}%</span>
+            <span className="text-emerald-400/80">{T.overview.accruedProfitLabel}</span>
+            <span className="font-bold text-emerald-300 font-mono">{metrics.netOperatingProfit.toLocaleString()} {T.common.currency}</span>
           </div>
         </div>
 
