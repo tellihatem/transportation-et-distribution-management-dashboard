@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import type { DriverSummary, DriverStatement, TabFilters } from '../types';
 import { fetchDriverStatement, fetchNextDriverPaymentId } from '../api/client';
+import { appAlert, appConfirm } from './AppDialogs';
+import { printPage } from '../print';
 
 interface DriverAccountsTabProps {
   summaries: DriverSummary[];
@@ -152,20 +154,20 @@ export function DriverAccountsTab({
       await openStatementForDriver(editForm.driverName);
       onRefreshTrips();
     } catch (err: any) {
-      alert(T.driverAccounts.editError(err.message));
+      await appAlert(T.driverAccounts.editError(err.message));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeletePayment = async (p: DriverStatement['payments'][number], driverName: string) => {
-    if (!confirm(T.driverAccounts.deleteConfirm(p.id, p.amount.toLocaleString()))) return;
+    if (!(await appConfirm(T.driverAccounts.deleteConfirm(p.id, p.amount.toLocaleString())))) return;
     try {
       await onDeletePayment(p.id);
       await openStatementForDriver(driverName);
       onRefreshTrips();
     } catch (err: any) {
-      alert(T.driverAccounts.deleteError(err.message));
+      await appAlert(T.driverAccounts.deleteError(err.message));
     }
   };
 
@@ -186,7 +188,7 @@ export function DriverAccountsTab({
       setIsPaymentModalOpen(false);
       onRefreshTrips();
     } catch (err: any) {
-      alert(T.driverAccounts.saveError(err.message));
+      await appAlert(T.driverAccounts.saveError(err.message));
     } finally {
       setSubmitting(false);
     }
@@ -218,21 +220,8 @@ export function DriverAccountsTab({
   /** Print with the party's name as the document title, so the saved PDF is
    *  named after the statement rather than after the application. */
   const printStatement = () => {
-    const originalTitle = document.title;
     const party = statementData?.driverName;
-    if (party) document.title = `${T.printCommon.statementFilePrefix}-${party}`;
-    let restored = false;
-    const restoreTitle = () => {
-      if (restored) return;
-      restored = true;
-      document.title = originalTitle;
-    };
-    // Electron does not always deliver afterprint (a dismissed dialog on some
-    // versions) — without the fallback each print click would leak a listener
-    // and later restore a stale title.
-    window.addEventListener('afterprint', restoreTitle, { once: true });
-    setTimeout(restoreTitle, 120000);
-    window.print();
+    void printPage(party ? `${T.printCommon.statementFilePrefix}-${party}` : undefined);
   };
 
   return (

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, utilityProcess } from 'electron';
+import { app, BrowserWindow, ipcMain, utilityProcess } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -233,6 +233,30 @@ async function stopBackend() {
   });
 }
 
+/**
+ * Print on behalf of the renderer (electron/preload.js → src/print.ts).
+ *
+ * The renderer must not call window.print() itself: on Windows, a closed
+ * native print dialog leaves the window's keyboard focus broken — every
+ * input stops accepting keystrokes until the window is unfocused and
+ * refocused, the same bug class as alert()/confirm() (electron/electron
+ * #31917 — see src/components/AppDialogs.tsx). webContents.print()'s
+ * callback fires reliably when the dialog closes (printed or cancelled),
+ * which is the moment to blur and refocus the window — programmatically
+ * doing what Alt-Tabbing away and back does by hand.
+ */
+ipcMain.handle('app:print', async (event) => {
+  const contents = event.sender;
+  await new Promise((resolve) => {
+    contents.print({}, () => resolve());
+  });
+  const win = BrowserWindow.fromWebContents(contents);
+  if (win && !win.isDestroyed()) {
+    win.blur();
+    win.focus();
+  }
+});
+
 async function createWindow() {
   const port = await startBackend();
 
@@ -248,6 +272,7 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
       // Chromium throttles timers and animation frames in a window it thinks
       // nobody is looking at — minimised, fully covered by another window, or
       // on a machine that has gone to sleep. This is a dashboard someone
