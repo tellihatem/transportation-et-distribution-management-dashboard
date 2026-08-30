@@ -968,16 +968,16 @@ export default function App() {
                 <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">{T.master.periodProfitTitle}</p>
 
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className={`text-4xl font-black font-mono tracking-tight ${masterCashNet >= 0 ? 'text-emerald-400 drop-shadow-[0_0_12px_rgba(34,197,94,0.2)]' : 'text-rose-500'}`}>
-                    {masterCashNet.toLocaleString()}
+                  <span className={`text-4xl font-black font-mono tracking-tight ${masterNetProfit >= 0 ? 'text-emerald-400 drop-shadow-[0_0_12px_rgba(34,197,94,0.2)]' : 'text-rose-500'}`}>
+                    {masterNetProfit.toLocaleString()}
                   </span>
                   <span className="text-sm text-slate-400">{T.common.currency}</span>
                 </div>
 
                 <p className="mt-1 text-[10px] text-slate-500">
-                  {T.master.invoicedProfitLabel}{' '}
-                  <span className={`font-mono font-bold ${masterNetProfit >= 0 ? 'text-slate-300' : 'text-rose-400'}`}>
-                    {masterNetProfit.toLocaleString()} {T.common.currency}
+                  {T.master.cashNetLabel}{' '}
+                  <span className={`font-mono font-bold ${masterCashNet >= 0 ? 'text-slate-300' : 'text-rose-400'}`}>
+                    {masterCashNet.toLocaleString()} {T.common.currency}
                   </span>
                 </p>
 

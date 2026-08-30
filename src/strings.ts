@@ -107,7 +107,7 @@ export const T = {
     netProfit: "صافي أرباح الشركة الفعلي",
     /** Sub-line of card 2: net profit as a percentage. */
     netMarginLabel: "هامش الربح الصافي:",
-    accruedProfitLabel: "الربح المحتسب (فواتير):",
+    cashFlowLabel: "صافي النقد في الخزينة:",
     /** KPI card 3 title: money clients still owe the company. */
     clientReceivables: "مستحقات عند العملاء (ديون)",
     /** Sub-line of card 3: money clients paid in advance, not yet used. */
@@ -741,12 +741,11 @@ export const T = {
     driverPaid: "المدفوع للسائقين (إجمالي)",
     driverPayable: "متبقي للسائقين (إجمالي)",
     /** The large profit figure on the right of the panel. */
-    periodProfitTitle: "صافي أموال الشركة (نقداً)",
+    periodProfitTitle: "الربح المحتسب على الفواتير (للفترة)",
     /** Reminder that the profit above is invoiced, not cash in hand. */
-    /** The secondary line under the big cash figure: the accrual profit
-     *  computed on invoices for the SELECTED PERIOD — what the business made
-     *  on paper, whether or not the money has moved yet. */
-    invoicedProfitLabel: "الربح المحتسب على الفواتير (للفترة):",
+    /** The secondary line under the big invoiced figure: the actual cash
+     *  in the till (the same all-time money-flow result as the equation). */
+    cashNetLabel: "صافي النقد في الخزينة:",
     /** Health line: shown when profitable / when costs exceed margins. */
     healthy: "الخزينة موجبة — المقبوض يغطي كل المدفوع",
     unhealthy: "المدفوع يتخطى المقبوض — الخزينة بالسالب",
