@@ -618,12 +618,27 @@ export default function App() {
             width: 100% !important;
             height: 300px !important;
           }
+          /* Company logo on every printed page: position:fixed repeats per
+             page when printing, and the faint opacity keeps the figures on
+             top readable — a letterhead watermark, not an overlay. */
+          .print-logo-watermark {
+            display: block !important;
+            visibility: visible !important;
+            position: fixed !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            width: 65% !important;
+            max-width: 420px !important;
+            opacity: 0.07 !important;
+          }
         }
       `}</style>
 
       {/* OFFLINE EMBEDDED DUST PRINT PREVIEW ELEMENT (Only displays on actual browser print operation) */}
       {selectedReceipt && (
         <div className="hidden print-receipt-container">
+          <img src={logoUrl} alt="" className="hidden print-logo-watermark" />
           <div className="max-w-2xl mx-auto border-2 border-dashed border-slate-400 p-8 rounded-lg bg-white text-black space-y-6">
             <div className="flex justify-between items-center border-b-2 border-slate-800 pb-4">
               <div className="flex items-center gap-3">

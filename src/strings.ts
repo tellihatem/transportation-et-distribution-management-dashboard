@@ -46,7 +46,7 @@ export const T = {
    * ──────────────────────────────────────────────────────────────────────── */
   brand: {
     /** Company name — appears in the app header, invoices and statements. */
-    companyName: "شركة لعلاوي عبد الرحيم لبيع مواد البناء",
+    companyName: "لعلاوي عبد الرحيم لبيع مواد البناء",
     /** Small badge next to the company name in the header. */
     safeModeBadge: "وضع آمن",
     /** One-line description of what the app does, under the company name. */
@@ -54,9 +54,9 @@ export const T = {
     /** Label above the owner's name in the header. */
     managerLabel: "المسؤول",
     /** The owner / person responsible. */
-    managerName: "السيد لعلاوي عبد المالك",
+    managerName: "السيد لعلاوي عبد الرحيم",
     /** Owner name as signed at the bottom of printed documents. */
-    signatureName: "لعلاوي عبد المالك",
+    signatureName: "لعلاوي عبد الرحيم",
   },
 
   /* ────────────────────────────────────────────────────────────────────────

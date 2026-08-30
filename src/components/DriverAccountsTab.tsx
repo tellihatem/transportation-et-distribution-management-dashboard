@@ -29,6 +29,7 @@ import type { DriverSummary, DriverStatement, TabFilters } from '../types';
 import { fetchDriverStatement, fetchNextDriverPaymentId } from '../api/client';
 import { appAlert, appConfirm } from './AppDialogs';
 import { printPage } from '../print';
+import logoUrl from '../../assets/logo.png';
 
 interface DriverAccountsTabProps {
   summaries: DriverSummary[];
@@ -880,8 +881,10 @@ export function DriverAccountsTab({
           that subtree to be printable at all. */}
       {statementData && isStatementModalOpen && createPortal(
         <div className="hidden print-statement-container">
+          <img src={logoUrl} alt="" className="hidden print-logo-watermark" />
           <div style={{ maxWidth: '700px', margin: '0 auto', fontFamily: 'sans-serif' }}>
             <div style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '12px', marginBottom: '16px' }}>
+              <img src={logoUrl} alt="" style={{ height: '52px', display: 'block', margin: '0 auto 6px', objectFit: 'contain' }} />
               <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px' }}>{T.brand.companyName}</h1>
               <p style={{ fontSize: '11px', margin: '0 0 4px', color: '#666' }}>{T.driverAccounts.printTitle}</p>
               <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0' }}>{T.driverAccounts.printDriverLabel} {statementData.driverName}</p>
