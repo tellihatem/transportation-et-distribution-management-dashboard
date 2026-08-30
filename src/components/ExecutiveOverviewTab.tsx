@@ -207,12 +207,12 @@ export function ExecutiveOverviewTab({
             <span>{T.overview.netProfit}</span>
             <TrendingUp className="w-5 h-5 text-emerald-400" />
           </div>
-          <div className={`text-3xl font-extrabold font-mono ${metrics.netCashFlow >= 0 ? 'text-emerald-300' : 'text-rose-400'}`}>
-            {metrics.netCashFlow.toLocaleString()} <span className="text-sm font-normal text-emerald-500">{T.common.currency}</span>
+          <div className={`text-3xl font-extrabold font-mono ${metrics.netOperatingProfit >= 0 ? 'text-emerald-300' : 'text-rose-400'}`}>
+            {metrics.netOperatingProfit.toLocaleString()} <span className="text-sm font-normal text-emerald-500">{T.common.currency}</span>
           </div>
           <div className="mt-3 pt-3 border-t border-emerald-900/60 flex items-center justify-between text-xs">
-            <span className="text-emerald-400/80">{T.overview.accruedProfitLabel}</span>
-            <span className="font-bold text-emerald-300 font-mono">{metrics.netOperatingProfit.toLocaleString()} {T.common.currency}</span>
+            <span className="text-emerald-400/80">{T.overview.cashFlowLabel}</span>
+            <span className="font-bold text-emerald-300 font-mono">{metrics.netCashFlow.toLocaleString()} {T.common.currency}</span>
           </div>
         </div>
 
